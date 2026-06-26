@@ -4,6 +4,7 @@
 import {
   ChangeEvent,
   FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -32,6 +33,7 @@ type GameRecord = {
 };
 
 type FormState = Omit<GameRecord, "id">;
+type AccessStatus = "checking" | "locked" | "unlocked";
 
 type NintendoCoverResult = {
   id: string;
@@ -167,21 +169,44 @@ export default function Home() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
+  const [accessStatus, setAccessStatus] = useState<AccessStatus>("checking");
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"date" | "price" | "title">("date");
   const [coverResults, setCoverResults] = useState<NintendoCoverResult[]>([]);
   const [coverStatus, setCoverStatus] = useState<"idle" | "searching">("idle");
   const [coverError, setCoverError] = useState("");
 
+  const unlockLedger = useCallback(() => {
+    setRecords(loadInitialRecords());
+    setForm(createEmptyForm());
+    setStorageReady(true);
+    setAccessStatus("unlocked");
+  }, []);
+
+  const checkAccess = useCallback(async () => {
+    try {
+      const response = await fetch("/api/access", { cache: "no-store" });
+      const payload = (await response.json()) as { authenticated?: boolean };
+
+      if (payload.authenticated) {
+        unlockLedger();
+      } else {
+        setAccessStatus("locked");
+      }
+    } catch {
+      setAccessStatus("locked");
+    }
+  }, [unlockLedger]);
+
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      setRecords(loadInitialRecords());
-      setForm(createEmptyForm());
-      setStorageReady(true);
+      checkAccess();
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, []);
+  }, [checkAccess]);
 
   useEffect(() => {
     if (!storageReady) {
@@ -190,6 +215,43 @@ export default function Home() {
 
     window.localStorage.setItem(storageKey, JSON.stringify(records));
   }, [records, storageReady]);
+
+  async function submitPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!password.trim()) {
+      setPasswordError("请输入访问密码");
+      return;
+    }
+
+    setPasswordError("");
+
+    try {
+      const response = await fetch("/api/access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) {
+        setPasswordError("密码不正确");
+        return;
+      }
+
+      setPassword("");
+      unlockLedger();
+    } catch {
+      setPasswordError("无法验证密码，请稍后重试");
+    }
+  }
+
+  async function lockLedger() {
+    await fetch("/api/access", { method: "DELETE" }).catch(() => undefined);
+    setStorageReady(false);
+    setAccessStatus("locked");
+    setEditingId(null);
+    setPassword("");
+  }
 
   const filteredRecords = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -471,6 +533,47 @@ export default function Home() {
     setCoverError("");
   }
 
+  if (accessStatus !== "unlocked") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f4f7fb] px-4 py-8 text-[#202020]">
+        <form
+          onSubmit={submitPassword}
+          className="grid w-full max-w-sm gap-4 rounded-lg border border-[#d8d2c5] bg-white p-5 shadow-sm"
+        >
+          <div>
+            <p className="text-sm font-semibold text-[#d1222a]">Nintendo Switch</p>
+            <h1 className="mt-1 text-2xl font-bold">游戏购买记录</h1>
+          </div>
+          <label className="field">
+            <span>访问密码</span>
+            <input
+              autoComplete="current-password"
+              disabled={accessStatus === "checking"}
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder={
+                accessStatus === "checking" ? "正在检查访问状态" : "输入密码"
+              }
+            />
+          </label>
+          {passwordError ? (
+            <p className="rounded-md bg-[#fff2cf] px-3 py-2 text-sm font-semibold text-[#755900]">
+              {passwordError}
+            </p>
+          ) : null}
+          <button
+            className="primary-button w-full"
+            disabled={accessStatus === "checking"}
+            type="submit"
+          >
+            {accessStatus === "checking" ? "检查中" : "进入账本"}
+          </button>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f4f7fb] text-[#202020]">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-3 py-4 sm:px-6 lg:px-8">
@@ -493,6 +596,13 @@ export default function Home() {
               value={formatCurrencyStats(saleStats, "total")}
             />
           </div>
+          <button
+            className="ghost-button self-start lg:self-auto"
+            type="button"
+            onClick={lockLedger}
+          >
+            锁定
+          </button>
         </header>
 
         <section className="grid gap-4 xl:grid-cols-[400px_1fr]">
@@ -582,7 +692,7 @@ export default function Home() {
                   required
                   value={form.title}
                   onChange={(event) => updateForm("title", event.target.value)}
-                  placeholder="例如 薩爾達 / 星之卡比 / Mario Kart"
+                  placeholder="例如 萨尔达 / 星之卡比 / Mario Kart"
                 />
               </label>
 
