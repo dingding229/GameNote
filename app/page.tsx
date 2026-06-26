@@ -93,7 +93,7 @@ const emptyForm: FormState = {
   title: "",
   price: 0,
   currency: "CNY",
-  purchaseDate: new Date().toISOString().slice(0, 10),
+  purchaseDate: "",
   region: "日版",
   format: "实体卡带",
   seller: "",
@@ -153,21 +153,43 @@ function coverLabel(title: string) {
     .toUpperCase();
 }
 
+function todayString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function createEmptyForm() {
+  return { ...emptyForm, purchaseDate: todayString() };
+}
+
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [records, setRecords] = useState<GameRecord[]>(loadInitialRecords);
+  const [records, setRecords] = useState<GameRecord[]>(starterRecords);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"date" | "price" | "title">("date");
   const [coverResults, setCoverResults] = useState<NintendoCoverResult[]>([]);
   const [coverStatus, setCoverStatus] = useState<"idle" | "searching">("idle");
   const [coverError, setCoverError] = useState("");
-  const today = new Date().toISOString().slice(0, 10);
 
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setRecords(loadInitialRecords());
+      setForm(createEmptyForm());
+      setStorageReady(true);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) {
+      return;
+    }
+
     window.localStorage.setItem(storageKey, JSON.stringify(records));
-  }, [records]);
+  }, [records, storageReady]);
 
   const filteredRecords = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -250,7 +272,7 @@ export default function Home() {
 
   function resetForm() {
     setEditingId(null);
-    setForm({ ...emptyForm, purchaseDate: today });
+    setForm(createEmptyForm());
     setCoverResults([]);
     setCoverError("");
   }
@@ -323,7 +345,7 @@ export default function Home() {
   function toggleSold(checked: boolean) {
     setForm((current) => ({
       ...current,
-      soldDate: checked ? current.soldDate || today : "",
+      soldDate: checked ? current.soldDate || todayString() : "",
       soldPrice: checked ? current.soldPrice : 0,
       soldCurrency: checked ? current.soldCurrency || current.currency : current.currency,
     }));
@@ -332,7 +354,7 @@ export default function Home() {
   function startSaleRecord(record: GameRecord) {
     editRecord({
       ...record,
-      soldDate: record.soldDate || today,
+      soldDate: record.soldDate || todayString(),
       soldPrice: record.soldPrice || 0,
       soldCurrency: record.soldCurrency || record.currency,
     });
