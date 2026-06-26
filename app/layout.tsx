@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Switch 卡带购买记录",
-  description: "记录 Nintendo Switch 卡带购买信息和封面。",
+  title: "Switch 游戏购买记录",
+  description: "记录 Nintendo Switch 实体卡带、数字版和卖出信息。",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

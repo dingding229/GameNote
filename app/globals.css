@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f6f4ef;
+  --background: #f4f7fb;
   --foreground: #202020;
 }
 
@@ -40,7 +40,7 @@ button:disabled {
 }
 
 .field span {
-  color: #675f52;
+  color: #4e5968;
   font-size: 0.76rem;
   font-weight: 700;
 }
@@ -50,9 +50,9 @@ button:disabled {
 .field textarea {
   min-height: 2.6rem;
   width: 100%;
-  border: 1px solid #cfc7b8;
+  border: 1px solid #c8d1dc;
   border-radius: 0.45rem;
-  background: #fffdf8;
+  background: #ffffff;
   color: #202020;
   outline: none;
   padding: 0.62rem 0.72rem;
@@ -110,18 +110,18 @@ button:disabled {
 }
 
 .secondary-button:hover {
-  background: #38332e;
+  background: #313946;
 }
 
 .ghost-button {
-  border: 1px solid #cfc7b8;
-  background: #fffdf8;
+  border: 1px solid #c8d1dc;
+  background: #ffffff;
   color: #202020;
 }
 
 .ghost-button:hover {
-  border-color: #a69c8d;
-  background: #f6f4ef;
+  border-color: #94a3b8;
+  background: #f6f9fc;
 }
 
 .danger-button {
@@ -136,8 +136,8 @@ button:disabled {
 
 .cover-result {
   align-items: center;
-  background: #fffdf8;
-  border: 1px solid #d8d2c5;
+  background: #ffffff;
+  border: 1px solid #d3dce8;
   border-radius: 0.45rem;
   color: #202020;
   display: grid;
@@ -150,7 +150,7 @@ button:disabled {
 
 .cover-result:hover {
   border-color: #d1222a;
-  background: #fff8f1;
+  background: #fff7f7;
 }
 
 .cover-result img {
@@ -180,8 +180,23 @@ button:disabled {
 }
 
 .cover-result small {
-  color: #675f52;
+  color: #4e5968;
   font-size: 0.78rem;
+}
+
+.checkbox-field {
+  align-items: center;
+  color: #202020;
+  display: flex;
+  gap: 0.55rem;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.checkbox-field input {
+  accent-color: #d1222a;
+  height: 1.05rem;
+  width: 1.05rem;
 }
 
 .line-clamp-2 {
