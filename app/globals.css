@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f4ef;
+  --foreground: #202020;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.field span {
+  color: #675f52;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.field input,
+.field select,
+.field textarea {
+  min-height: 2.6rem;
+  width: 100%;
+  border: 1px solid #cfc7b8;
+  border-radius: 0.45rem;
+  background: #fffdf8;
+  color: #202020;
+  outline: none;
+  padding: 0.62rem 0.72rem;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    background 120ms ease;
+}
+
+.field textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: #d1222a;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgb(209 34 42 / 14%);
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button,
+.danger-button {
+  align-items: center;
+  border-radius: 0.45rem;
+  display: inline-flex;
+  font-size: 0.92rem;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 2.55rem;
+  padding: 0.6rem 0.85rem;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.primary-button {
+  background: #e60012;
+  color: white;
+}
+
+.primary-button:hover {
+  background: #c90010;
+}
+
+.secondary-button {
+  border: 1px solid #202020;
+  background: #202020;
+  color: #ffffff;
+}
+
+.secondary-button:hover {
+  background: #38332e;
+}
+
+.ghost-button {
+  border: 1px solid #cfc7b8;
+  background: #fffdf8;
+  color: #202020;
+}
+
+.ghost-button:hover {
+  border-color: #a69c8d;
+  background: #f6f4ef;
+}
+
+.danger-button {
+  border: 1px solid #f0c3c3;
+  background: #fff5f5;
+  color: #b42323;
+}
+
+.danger-button:hover {
+  background: #ffe7e7;
+}
+
+.cover-result {
+  align-items: center;
+  background: #fffdf8;
+  border: 1px solid #d8d2c5;
+  border-radius: 0.45rem;
+  color: #202020;
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: 4.5rem 1fr;
+  min-height: 4.5rem;
+  padding: 0.45rem;
+  text-align: left;
+}
+
+.cover-result:hover {
+  border-color: #d1222a;
+  background: #fff8f1;
+}
+
+.cover-result img {
+  aspect-ratio: 1 / 1;
+  border-radius: 0.32rem;
+  height: 4.5rem;
+  object-fit: cover;
+  width: 4.5rem;
+}
+
+.cover-result span {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.cover-result strong,
+.cover-result small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-result strong {
+  font-size: 0.92rem;
+  line-height: 1.25rem;
+}
+
+.cover-result small {
+  color: #675f52;
+  font-size: 0.78rem;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
