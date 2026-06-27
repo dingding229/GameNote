@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 
-type Region = "日版" | "港版" | "美版" | "欧版" | "国行" | "其他";
+type Region = "日版" | "港版" | "美版" | "欧版" | "其他";
 type GameFormat = "实体卡带" | "数字版";
 type Currency = "CNY" | "JPY" | "HKD" | "USD";
 
@@ -44,12 +44,12 @@ type NintendoCoverResult = {
   releaseDate: string | null;
   price: number | null;
   currency: string | null;
-  source: "algolia" | "hong-kong" | "page";
+  source: "mainland" | "hong-kong" | "algolia" | "page";
 };
 
 const storageKey = "switch-cartridge-ledger";
 const currencies = ["CNY", "JPY", "HKD", "USD"] as const;
-const regions = ["日版", "港版", "美版", "欧版", "国行", "其他"] as const;
+const regions = ["日版", "港版", "美版", "欧版", "其他"] as const;
 const gameFormats = ["实体卡带", "数字版"] as const;
 
 const starterRecords: GameRecord[] = [
@@ -153,6 +153,15 @@ function coverLabel(title: string) {
     .map((word) => word[0])
     .join("")
     .toUpperCase();
+}
+
+function coverSourceLabel(source: NintendoCoverResult["source"]) {
+  return {
+    mainland: "大陆站",
+    "hong-kong": "香港站",
+    algolia: "美国站",
+    page: "页面",
+  }[source];
 }
 
 function todayString() {
@@ -535,10 +544,10 @@ export default function Home() {
 
   if (accessStatus !== "unlocked") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f4f7fb] px-4 py-8 text-[#202020]">
+      <main className="flex min-h-screen items-center justify-center bg-[#eef3f8] px-4 py-8 text-[#202020]">
         <form
           onSubmit={submitPassword}
-          className="grid w-full max-w-sm gap-4 rounded-lg border border-[#d8d2c5] bg-white p-5 shadow-sm"
+          className="grid w-full max-w-md gap-4 rounded-lg border border-[#d7dde6] bg-white p-5 shadow-sm sm:p-6"
         >
           <div>
             <p className="text-sm font-semibold text-[#d1222a]">Nintendo Switch</p>
@@ -575,16 +584,27 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f4f7fb] text-[#202020]">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-3 py-4 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 border-b border-[#d8d2c5] pb-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-[#d1222a]">Nintendo Switch</p>
-            <h1 className="mt-1 text-3xl font-bold tracking-normal sm:text-4xl">
-              游戏购买记录
-            </h1>
+    <main className="min-h-screen bg-[#eef3f8] text-[#202020]">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-3 sm:gap-5 sm:px-5 sm:py-5 lg:px-8">
+        <header className="rounded-lg border border-[#d7dde6] bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[#d1222a]">
+                Nintendo Switch
+              </p>
+              <h1 className="mt-1 text-2xl font-bold tracking-normal sm:text-4xl">
+                游戏购买记录
+              </h1>
+            </div>
+            <button
+              className="ghost-button self-start sm:self-center"
+              type="button"
+              onClick={lockLedger}
+            >
+              锁定
+            </button>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:min-w-[680px]">
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
             <Stat label="游戏数" value={`${records.length}`} />
             <Stat label="实体 / 数字" value={`${physicalCount} / ${digitalCount}`} />
             <Stat
@@ -596,19 +616,12 @@ export default function Home() {
               value={formatCurrencyStats(saleStats, "total")}
             />
           </div>
-          <button
-            className="ghost-button self-start lg:self-auto"
-            type="button"
-            onClick={lockLedger}
-          >
-            锁定
-          </button>
         </header>
 
-        <section className="grid gap-4 xl:grid-cols-[400px_1fr]">
+        <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
           <form
             onSubmit={handleSubmit}
-            className="h-fit rounded-lg border border-[#d8d2c5] bg-white p-4 shadow-sm"
+            className="h-fit rounded-lg border border-[#d7dde6] bg-white p-3 shadow-sm sm:p-4 xl:sticky xl:top-5"
           >
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold">
@@ -621,15 +634,15 @@ export default function Home() {
               ) : null}
             </div>
 
-            <div className="mt-4 overflow-hidden rounded-md border border-[#d8d2c5] bg-[#faf9f5]">
+            <div className="mt-4 overflow-hidden rounded-md border border-[#d7dde6] bg-[#f8fafc]">
               {form.coverUrl ? (
                 <img
                   src={form.coverUrl}
                   alt={`${form.title || "游戏"}封面`}
-                  className="h-56 w-full object-cover"
+                  className="h-48 w-full object-cover sm:h-60"
                 />
               ) : (
-                <div className="flex h-56 items-center justify-center bg-[#e60012] px-8 text-center text-4xl font-black text-white">
+                <div className="flex h-48 items-center justify-center bg-[#e60012] px-8 text-center text-4xl font-black text-white sm:h-60">
                   {coverLabel(form.title) || "SWITCH"}
                 </div>
               )}
@@ -673,7 +686,7 @@ export default function Home() {
                     <span>
                       <strong>{result.title}</strong>
                       <small>
-                        {result.source === "hong-kong" ? "香港站 · " : ""}
+                        {coverSourceLabel(result.source)} ·{" "}
                         {result.platform}
                         {result.releaseDate
                           ? ` · ${result.releaseDate.slice(0, 10)}`
@@ -692,7 +705,7 @@ export default function Home() {
                   required
                   value={form.title}
                   onChange={(event) => updateForm("title", event.target.value)}
-                  placeholder="例如 萨尔达 / 星之卡比 / Mario Kart"
+                  placeholder="例如 塞尔达 / 星之卡比 / Mario Kart"
                 />
               </label>
 
@@ -763,7 +776,7 @@ export default function Home() {
               </div>
 
               {form.format === "实体卡带" ? (
-                <div className="rounded-md border border-[#d8d2c5] bg-[#f7fbff] p-3">
+                <div className="rounded-md border border-[#d7dde6] bg-[#f7fbff] p-3">
                   <label className="checkbox-field">
                     <input
                       type="checkbox"
@@ -860,7 +873,7 @@ export default function Home() {
           </form>
 
           <section className="flex min-w-0 flex-col gap-4">
-            <div className="grid gap-3 rounded-lg border border-[#d8d2c5] bg-white p-3 shadow-sm sm:p-4 md:grid-cols-[1fr_170px_120px_120px]">
+            <div className="grid gap-3 rounded-lg border border-[#d7dde6] bg-white p-3 shadow-sm sm:p-4 md:grid-cols-[minmax(0,1fr)_160px_auto_auto] md:items-end">
               <label className="field">
                 <span>搜索</span>
                 <input
@@ -882,10 +895,10 @@ export default function Home() {
                   <option value="title">游戏名字</option>
                 </select>
               </label>
-              <button className="ghost-button self-end" onClick={importRecordsClick}>
+              <button className="ghost-button w-full md:w-auto" onClick={importRecordsClick}>
                 导入 JSON
               </button>
-              <button className="secondary-button self-end" onClick={exportRecords}>
+              <button className="secondary-button w-full md:w-auto" onClick={exportRecords}>
                 导出 JSON
               </button>
               <input
@@ -901,7 +914,7 @@ export default function Home() {
               {filteredRecords.map((record) => (
                 <article
                   key={record.id}
-                  className="overflow-hidden rounded-lg border border-[#d8d2c5] bg-white shadow-sm"
+                  className="overflow-hidden rounded-lg border border-[#d7dde6] bg-white shadow-sm"
                 >
                   <div className="relative aspect-[16/9] bg-[#e60012]">
                     {record.coverUrl ? (
@@ -956,7 +969,7 @@ export default function Home() {
                       <div className="flex flex-wrap gap-2">
                         {record.format === "实体卡带" && !record.soldDate ? (
                           <button
-                            className="secondary-button flex-1 sm:flex-none"
+                            className="secondary-button flex-1 basis-[calc(50%-0.25rem)] sm:flex-none sm:basis-auto"
                             type="button"
                             onClick={() => startSaleRecord(record)}
                           >
@@ -964,14 +977,14 @@ export default function Home() {
                           </button>
                         ) : null}
                         <button
-                          className="ghost-button flex-1 sm:flex-none"
+                          className="ghost-button flex-1 basis-[calc(50%-0.25rem)] sm:flex-none sm:basis-auto"
                           type="button"
                           onClick={() => editRecord(record)}
                         >
                           编辑
                         </button>
                         <button
-                          className="danger-button flex-1 sm:flex-none"
+                          className="danger-button flex-1 basis-[calc(50%-0.25rem)] sm:flex-none sm:basis-auto"
                           type="button"
                           onClick={() => deleteRecord(record.id)}
                         >
@@ -990,7 +1003,7 @@ export default function Home() {
             </div>
 
             {!filteredRecords.length ? (
-              <div className="rounded-lg border border-dashed border-[#c8c0b1] bg-white p-10 text-center text-[#675f52]">
+              <div className="rounded-lg border border-dashed border-[#9aa8b7] bg-white p-10 text-center text-[#4e5968]">
                 没有匹配记录
               </div>
             ) : null}
@@ -1003,9 +1016,9 @@ export default function Home() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-[#d8d2c5] bg-white px-4 py-3 shadow-sm">
-      <p className="text-xs font-semibold text-[#675f52]">{label}</p>
-      <p className="mt-1 truncate text-xl font-bold" title={value}>
+    <div className="min-w-0 rounded-md border border-[#d7dde6] bg-[#f8fafc] px-3 py-2.5">
+      <p className="text-xs font-semibold text-[#4e5968]">{label}</p>
+      <p className="mt-1 truncate text-lg font-bold sm:text-xl" title={value}>
         {value}
       </p>
     </div>

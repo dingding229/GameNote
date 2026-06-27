@@ -38,6 +38,15 @@ type HongKongHit = {
   imageHero?: { url?: string };
 };
 
+type MainlandHit = {
+  title?: string;
+  imgUrl?: string;
+  jumpUrl?: string;
+  publishTime?: string;
+  version?: string;
+  price?: number;
+};
+
 type CoverResult = {
   id: string;
   title: string;
@@ -47,7 +56,7 @@ type CoverResult = {
   releaseDate: string | null;
   price: number | null;
   currency: string | null;
-  source: "algolia" | "hong-kong" | "page";
+  source: "mainland" | "hong-kong" | "algolia" | "page";
 };
 
 const algoliaAppId = "U3B6GR4UA3";
@@ -55,6 +64,8 @@ const algoliaApiKey = "a29c6927638bfd8cee23993e51e721c9";
 const algoliaIndex = "store_game_en_us";
 const nintendoBaseUrl = "https://www.nintendo.com";
 const nintendoHongKongSoftwareUrl = "https://www.nintendo.com/hk/software/switch";
+const nintendoMainlandBaseUrl = "https://www.nintendoswitch.com.cn";
+const nintendoMainlandSoftwareUrl = `${nintendoMainlandBaseUrl}/software`;
 const imageBaseUrl = "https://assets.nintendo.com/image/upload/q_auto/f_auto/";
 
 const retrieveAttributes = [
@@ -99,25 +110,56 @@ export async function GET(request: NextRequest) {
 }
 
 async function searchNintendo(query: string): Promise<CoverResult[]> {
-  const [hongKongLookup, algoliaLookup] = await Promise.allSettled([
+  const [mainlandLookup, hongKongLookup, algoliaLookup] = await Promise.allSettled([
+    searchNintendoMainland(query),
     searchNintendoHongKong(query),
     searchNintendoAlgolia(query),
   ]);
 
   const results = [
+    ...(mainlandLookup.status === "fulfilled" ? mainlandLookup.value : []),
     ...(hongKongLookup.status === "fulfilled" ? hongKongLookup.value : []),
     ...(algoliaLookup.status === "fulfilled" ? algoliaLookup.value : []),
   ];
 
-  if (!results.length && hongKongLookup.status === "rejected") {
-    throw hongKongLookup.reason;
-  }
-
-  if (!results.length && algoliaLookup.status === "rejected") {
-    throw algoliaLookup.reason;
+  if (!results.length) {
+    const rejectedLookup = [mainlandLookup, hongKongLookup, algoliaLookup].find(
+      (lookup) => lookup.status === "rejected",
+    );
+    if (rejectedLookup?.status === "rejected") {
+      throw rejectedLookup.reason;
+    }
   }
 
   return dedupeCoverResults(results).slice(0, 12);
+}
+
+async function searchNintendoMainland(query: string): Promise<CoverResult[]> {
+  const response = await fetch(nintendoMainlandSoftwareUrl, {
+    headers: {
+      "accept-language": "zh-CN,zh;q=0.9,en;q=0.6",
+      "user-agent": "Mozilla/5.0 Switch Purchase Ledger",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Nintendo Mainland search returned ${response.status}`);
+  }
+
+  const variants = buildMainlandQueryVariants(query);
+  const hits = extractMainlandHits(await response.text());
+
+  return hits
+    .map((hit) => ({
+      hit,
+      score: Math.max(
+        ...variants.map((variant) => scoreMainlandHit(hit, variant)),
+      ),
+    }))
+    .filter(({ score }) => score >= 24)
+    .sort((left, right) => right.score - left.score)
+    .map(({ hit }) => toMainlandCoverResult(hit))
+    .filter((result): result is CoverResult => Boolean(result));
 }
 
 async function searchNintendoHongKong(query: string): Promise<CoverResult[]> {
@@ -296,6 +338,60 @@ function scoreHongKongHit(hit: HongKongHit, query: string) {
   return score;
 }
 
+function scoreMainlandHit(hit: MainlandHit, query: string) {
+  const title = normalizeSearchText(applyMainlandTitleStyle(hit.title ?? ""));
+  const normalizedQuery = normalizeSearchText(applyMainlandTitleStyle(query));
+  const queryWords = normalizedQuery.split(" ").filter(Boolean);
+  let score = 0;
+
+  if (!title || !normalizedQuery) {
+    return score;
+  }
+
+  if (title === normalizedQuery) {
+    score += 150;
+  }
+
+  if (title.startsWith(normalizedQuery)) {
+    score += 100;
+  }
+
+  if (title.includes(normalizedQuery)) {
+    score += 80;
+  }
+
+  if (queryWords.length && queryWords.every((word) => title.includes(word))) {
+    score += 45;
+  }
+
+  if (hit.jumpUrl) {
+    score += 8;
+  }
+
+  if (typeof hit.price === "number") {
+    score += 4;
+  }
+
+  if (
+    !normalizedQuery.includes("通行证") &&
+    !normalizedQuery.includes("dlc") &&
+    title.includes("通行证")
+  ) {
+    score -= 35;
+  }
+
+  if (
+    !normalizedQuery.includes("实况") &&
+    !normalizedQuery.includes("家庭") &&
+    !normalizedQuery.includes("live") &&
+    title.includes("实况")
+  ) {
+    score -= 30;
+  }
+
+  return score;
+}
+
 async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | null> {
   const url = new URL(inputUrl);
   const host = url.hostname.toLowerCase();
@@ -309,6 +405,8 @@ async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | n
       "nintendo.com.hk",
       "ec.nintendo.com",
       "store.nintendo.com.hk",
+      "www.nintendoswitch.com.cn",
+      "nintendoswitch.com.cn",
     ].includes(host)
   ) {
     throw new Error("Only Nintendo product pages are supported");
@@ -339,7 +437,7 @@ async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | n
 
   return {
     id: canonicalUrl,
-    title: toSimplifiedText(title),
+    title: applyMainlandTitleStyle(toSimplifiedText(title)),
     coverUrl: optimizeCoverUrl(coverUrl),
     nintendoUrl: canonicalUrl,
     platform: "Nintendo Switch",
@@ -359,15 +457,17 @@ function toHongKongCoverResult(hit: HongKongHit): CoverResult | null {
 
   const nintendoUrl = buildHongKongGameUrl(hit);
   const categories = hit.category?.length
-    ? ` · ${hit.category.map(toSimplifiedText).join(" / ")}`
+    ? ` · ${hit.category.map(toSimplifiedText).map(applyMainlandTitleStyle).join(" / ")}`
     : "";
 
   return {
     id: hit.nsuid ?? hit.softCode ?? hit.sys?.id ?? nintendoUrl,
-    title: toSimplifiedText(hit.title),
+    title: applyMainlandTitleStyle(toSimplifiedText(hit.title)),
     coverUrl,
     nintendoUrl,
-    platform: `${toSimplifiedText(hit.hardwareCategory ?? "Nintendo Switch")}${categories}`,
+    platform: `${applyMainlandTitleStyle(
+      toSimplifiedText(hit.hardwareCategory ?? "Nintendo Switch"),
+    )}${categories}`,
     releaseDate:
       hit.releaseDatePackage ??
       hit.releaseDateDownload ??
@@ -376,6 +476,26 @@ function toHongKongCoverResult(hit: HongKongHit): CoverResult | null {
     price: null,
     currency: null,
     source: "hong-kong",
+  };
+}
+
+function toMainlandCoverResult(hit: MainlandHit): CoverResult | null {
+  if (!hit.title || !hit.imgUrl) {
+    return null;
+  }
+
+  const nintendoUrl = buildMainlandGameUrl(hit.jumpUrl);
+
+  return {
+    id: nintendoUrl || normalizeSearchText(hit.title),
+    title: applyMainlandTitleStyle(toSimplifiedText(hit.title)),
+    coverUrl: optimizeCoverUrl(decodeScriptEscapes(hit.imgUrl)),
+    nintendoUrl,
+    platform: hit.version ? `Nintendo Switch · ${hit.version}` : "Nintendo Switch",
+    releaseDate: hit.publishTime ?? null,
+    price: hit.price ?? null,
+    currency: hit.price ? "CNY" : null,
+    source: "mainland",
   };
 }
 
@@ -398,6 +518,24 @@ function buildHongKongGameUrl(hit: HongKongHit) {
   }
 
   return new URL(url, nintendoBaseUrl).toString();
+}
+
+function buildMainlandGameUrl(rawUrl: string | undefined) {
+  if (!rawUrl) {
+    return nintendoMainlandSoftwareUrl;
+  }
+
+  const decoded = decodeScriptEscapes(rawUrl).replace(/^http:\/\//, "https://");
+
+  if (/^\d+$/.test(decoded)) {
+    return `${nintendoMainlandSoftwareUrl}/${decoded}`;
+  }
+
+  try {
+    return new URL(decoded, nintendoMainlandBaseUrl).toString();
+  } catch {
+    return nintendoMainlandSoftwareUrl;
+  }
 }
 
 function toCoverResult(hit: NintendoHit): CoverResult | null {
@@ -496,6 +634,222 @@ function extractHongKongHits(html: string): HongKongHit[] {
   }
 }
 
+function extractMainlandHits(html: string): MainlandHit[] {
+  const text = decodeScriptEscapes(html);
+  const variableStrings = extractMainlandVariableStrings(text);
+  const hits: MainlandHit[] = [];
+  const assignedHits = new Map<string, MainlandHit>();
+  const assignmentPattern =
+    /([A-Za-z_$][\w$]*)\.(title|imgUrl|jumpUrl|publishTime|version|price)=([^;]+);/g;
+
+  for (const match of text.matchAll(assignmentPattern)) {
+    const [, owner, field, rawValue] = match;
+    const value = resolveMainlandToken(rawValue, variableStrings);
+
+    if (value === null) {
+      continue;
+    }
+
+    const hit = assignedHits.get(owner) ?? {};
+    setMainlandHitField(hit, field, value);
+    assignedHits.set(owner, hit);
+  }
+
+  hits.push(...assignedHits.values());
+
+  const objectPattern =
+    /\{title:((?:"(?:\\.|[^"\\])*")|[A-Za-z_$][\w$]*)[^{}]*?\}/g;
+
+  for (const match of text.matchAll(objectPattern)) {
+    const [block, rawTitle] = match;
+    const hit: MainlandHit = {};
+    const title = resolveMainlandToken(rawTitle, variableStrings);
+
+    if (typeof title === "string") {
+      hit.title = title;
+    }
+
+    for (const field of ["imgUrl", "jumpUrl", "publishTime", "version", "price"]) {
+      const value = extractMainlandObjectField(block, field, variableStrings);
+
+      if (value !== null) {
+        setMainlandHitField(hit, field, value);
+      }
+    }
+
+    hits.push(hit);
+  }
+
+  return dedupeMainlandHits(hits).filter((hit) => hit.title && hit.imgUrl);
+}
+
+function extractMainlandVariableStrings(text: string) {
+  const variables = new Map<string, string>();
+  const marker = "serverRendered:true}}(";
+  const callStart = text.lastIndexOf(marker);
+
+  if (callStart < 0) {
+    return variables;
+  }
+
+  const functionStart = text.lastIndexOf("function(", callStart);
+  const paramsEnd = functionStart >= 0 ? text.indexOf("){", functionStart) : -1;
+
+  if (functionStart < 0 || paramsEnd < 0) {
+    return variables;
+  }
+
+  const params = text
+    .slice(functionStart + "function(".length, paramsEnd)
+    .split(",")
+    .map((param) => param.trim())
+    .filter(Boolean);
+  const argsStart = callStart + marker.length;
+  const argsEnd =
+    text.indexOf("));</script>", argsStart) >= 0
+      ? text.indexOf("));</script>", argsStart)
+      : text.indexOf("));", argsStart);
+
+  if (argsEnd < 0) {
+    return variables;
+  }
+
+  const args = splitTopLevelArguments(text.slice(argsStart, argsEnd));
+
+  params.forEach((param, index) => {
+    const value = parseMainlandStringToken(args[index] ?? "");
+
+    if (value !== null) {
+      variables.set(param, value);
+    }
+  });
+
+  return variables;
+}
+
+function splitTopLevelArguments(value: string) {
+  const tokens: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      depth += 1;
+    } else if (char === "}" || char === "]") {
+      depth -= 1;
+    } else if (char === "," && depth === 0) {
+      tokens.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+
+  tokens.push(value.slice(start).trim());
+  return tokens;
+}
+
+function extractMainlandObjectField(
+  block: string,
+  field: string,
+  variables: Map<string, string>,
+) {
+  const pattern = new RegExp(
+    `${field}:((?:"(?:\\\\.|[^"\\\\])*")|[A-Za-z_$][\\w$]*|-?\\d+(?:\\.\\d+)?)`,
+  );
+  const match = block.match(pattern);
+
+  return match ? resolveMainlandToken(match[1], variables) : null;
+}
+
+function resolveMainlandToken(
+  rawValue: string,
+  variables: Map<string, string>,
+): string | number | null {
+  const value = rawValue.trim();
+  const stringValue = parseMainlandStringToken(value);
+
+  if (stringValue !== null) {
+    return stringValue;
+  }
+
+  if (/^-?\d+(?:\.\d+)?$/.test(value)) {
+    return Number(value);
+  }
+
+  return variables.get(value) ?? null;
+}
+
+function parseMainlandStringToken(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) {
+    return null;
+  }
+
+  return decodeHtml(decodeScriptEscapes(trimmed.slice(1, -1))) ?? "";
+}
+
+function setMainlandHitField(
+  hit: MainlandHit,
+  field: string,
+  value: string | number,
+) {
+  if (field === "price") {
+    hit.price = typeof value === "number" ? value : Number(value) || undefined;
+    return;
+  }
+
+  if (typeof value !== "string") {
+    return;
+  }
+
+  if (field === "title") {
+    hit.title = value;
+  } else if (field === "imgUrl") {
+    hit.imgUrl = value;
+  } else if (field === "jumpUrl") {
+    hit.jumpUrl = value;
+  } else if (field === "publishTime") {
+    hit.publishTime = value;
+  } else if (field === "version") {
+    hit.version = value;
+  }
+}
+
+function dedupeMainlandHits(hits: MainlandHit[]) {
+  const seen = new Set<string>();
+
+  return hits.filter((hit) => {
+    const key = normalizeSearchText(
+      `${hit.title ?? ""} ${hit.jumpUrl ?? ""} ${hit.imgUrl ?? ""}`,
+    );
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
 function findJsonEnd(text: string, start: number) {
   let depth = 0;
   let inString = false;
@@ -536,17 +890,50 @@ function dedupeCoverResults(results: CoverResult[]) {
   const seen = new Set<string>();
 
   return results.filter((result) => {
-    const key = normalizeSearchText(
-      result.nintendoUrl || result.coverUrl || result.title,
-    );
+    const keys = [
+      normalizeSearchText(result.title),
+      normalizeSearchText(result.nintendoUrl || result.coverUrl),
+    ].filter(Boolean);
 
-    if (seen.has(key)) {
+    if (keys.some((key) => seen.has(key))) {
       return false;
     }
 
-    seen.add(key);
+    keys.forEach((key) => seen.add(key));
     return true;
   });
+}
+
+function buildMainlandQueryVariants(query: string) {
+  const trimmed = query.trim();
+  const simplified = toSimplifiedText(trimmed);
+  const mainland = applyMainlandTitleStyle(simplified);
+  const variants = new Set<string>([trimmed, simplified, mainland]);
+  const normalized = trimmed.toLowerCase();
+  const aliasEntries: Array<[RegExp, string]> = [
+    [/马里奥|玛利欧|瑪利歐|mario/i, "马力欧"],
+    [/马车|mario\s*kart/i, "马力欧卡丁车"],
+    [/萨尔达|薩爾達|zelda/i, "塞尔达"],
+    [/宝可梦|寶可夢|口袋妖怪|pokemon/i, "宝可梦"],
+    [/健身环|健身環|ring fit/i, "健身环"],
+    [/星之卡比|kirby/i, "星之卡比"],
+    [/耀西|yoshi/i, "耀西"],
+    [/奥德赛|奧德賽|odyssey/i, "奥德赛"],
+  ];
+
+  for (const [pattern, replacement] of aliasEntries) {
+    if (pattern.test(normalized) || pattern.test(trimmed)) {
+      variants.add(applyMainlandTitleStyle(simplified.replace(pattern, replacement)));
+      if (
+        normalizeSearchText(simplified).length <=
+        normalizeSearchText(replacement).length + 1
+      ) {
+        variants.add(replacement);
+      }
+    }
+  }
+
+  return [...variants].filter(Boolean).slice(0, 8);
 }
 
 function buildHongKongQueryVariants(query: string) {
@@ -574,13 +961,34 @@ function buildHongKongQueryVariants(query: string) {
 
   for (const [pattern, replacement] of aliasEntries) {
     if (pattern.test(normalized) || pattern.test(trimmed)) {
-      variants.add(replacement);
       variants.add(trimmed.replace(pattern, replacement));
       variants.add(traditional.replace(pattern, replacement));
+      if (
+        normalizeSearchText(trimmed).length <=
+        normalizeSearchText(replacement).length + 1
+      ) {
+        variants.add(replacement);
+      }
     }
   }
 
   return [...variants].filter(Boolean).slice(0, 5);
+}
+
+function applyMainlandTitleStyle(value: string) {
+  return value
+    .replace(/\bZELDA\b/gi, "塞尔达")
+    .replaceAll("薩爾達", "塞尔达")
+    .replaceAll("萨尔达", "塞尔达")
+    .replaceAll("瑪利歐", "马力欧")
+    .replaceAll("玛利欧", "马力欧")
+    .replaceAll("马里奥", "马力欧")
+    .replaceAll("瑪利奧", "马力欧")
+    .replaceAll("玛利奥", "马力欧")
+    .replaceAll("超級马力欧", "超级马力欧")
+    .replaceAll("超級 马力欧", "超级 马力欧")
+    .replaceAll("卡比之星", "星之卡比")
+    .replaceAll("路易基", "路易吉");
 }
 
 function toTraditionalSearchText(value: string) {
@@ -1021,6 +1429,7 @@ function toSimplifiedText(value: string) {
     繳: "缴",
     網: "网",
     羅: "罗",
+    齊: "齐",
     罰: "罚",
     習: "习",
     聯: "联",
@@ -1052,6 +1461,7 @@ function toSimplifiedText(value: string) {
     薩: "萨",
     蔥: "葱",
     藍: "蓝",
+    魯: "鲁",
     虛: "虚",
     蟲: "虫",
     雖: "虽",
@@ -1229,4 +1639,17 @@ function decodeHtml(value: string | null) {
     .replaceAll("&apos;", "'")
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">");
+}
+
+function decodeScriptEscapes(value: string) {
+  return value
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code: string) =>
+      String.fromCharCode(parseInt(code, 16)),
+    )
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, code: string) =>
+      String.fromCharCode(parseInt(code, 16)),
+    )
+    .replaceAll("\\/", "/")
+    .replaceAll('\\"', '"')
+    .replaceAll("\\'", "'");
 }
