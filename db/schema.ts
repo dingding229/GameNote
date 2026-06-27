@@ -1,4 +1,8 @@
-// Intentionally empty by default.
-// Add Drizzle tables here when the site actually needs a database.
-// See examples/d1/db/schema.ts for an opt-in example.
-export {};
+import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const ledgerDocuments = sqliteTable("ledger_documents", {
+  id: text("id").primaryKey().notNull(),
+  account: text("account"),
+  records: text("records").notNull().default("[]"),
+  updatedAt: text("updated_at").notNull(),
+});

@@ -1,0 +1,15 @@
+services:
+  switch-ledger:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: switch-ledger
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      APP_ACCESS_PASSWORD: "请修改为你的访问密码"
+      APP_ACCESS_SESSION_SECRET: "请修改为一段更长的随机字符串"
+      APP_DATA_FILE: "/data/records.json"
+    volumes:
+      - ./data:/data

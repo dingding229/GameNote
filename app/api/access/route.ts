@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  accessCookieName,
+  createSessionToken,
+  getAccessPassword,
+  hasValidAccessCookie,
+} from "@/lib/access";
 
 export const runtime = "edge";
 
-const accessCookieName = "switch_ledger_access";
-const defaultLocalPassword = "ns2026";
 const sessionMaxAge = 60 * 60 * 24 * 30;
 
 type AccessPayload = {
@@ -49,28 +53,4 @@ export async function DELETE() {
   });
 
   return response;
-}
-
-async function hasValidAccessCookie(request: NextRequest) {
-  const cookie = request.cookies.get(accessCookieName)?.value ?? "";
-  return cookie === (await createSessionToken());
-}
-
-function getAccessPassword() {
-  return process.env.APP_ACCESS_PASSWORD || defaultLocalPassword;
-}
-
-function getSessionSecret() {
-  return process.env.APP_ACCESS_SESSION_SECRET || getAccessPassword();
-}
-
-async function createSessionToken() {
-  const input = new TextEncoder().encode(
-    `${getSessionSecret()}:${getAccessPassword()}:v1`,
-  );
-  const digest = await crypto.subtle.digest("SHA-256", input);
-
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }

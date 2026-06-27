@@ -30,10 +30,31 @@ type GameRecord = {
   soldDate: string;
   soldPrice: number;
   soldCurrency: Currency;
+  playTimeMinutes: number;
+  playTimeUpdatedAt: string;
+  firstPlayedDate: string;
+  lastPlayedDate: string;
 };
 
 type FormState = Omit<GameRecord, "id">;
 type AccessStatus = "checking" | "locked" | "unlocked";
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+type NintendoAccountBinding = {
+  displayName: string;
+  friendCode: string;
+  linkedAt: string;
+  playtimeUpdatedAt: string;
+};
+
+type AccountFormState = Pick<NintendoAccountBinding, "displayName" | "friendCode">;
+
+type PlaytimeImportEntry = {
+  title: string;
+  playTimeMinutes: number;
+  firstPlayedDate: string;
+  lastPlayedDate: string;
+};
 
 type NintendoCoverResult = {
   id: string;
@@ -47,49 +68,17 @@ type NintendoCoverResult = {
   source: "mainland" | "hong-kong" | "algolia" | "page";
 };
 
+type LedgerDocument = {
+  version: 1;
+  updatedAt: string;
+  account: NintendoAccountBinding | null;
+  records: GameRecord[];
+};
+
 const storageKey = "switch-cartridge-ledger";
 const currencies = ["CNY", "JPY", "HKD", "USD"] as const;
 const regions = ["日版", "港版", "美版", "欧版", "其他"] as const;
 const gameFormats = ["实体卡带", "数字版"] as const;
-
-const starterRecords: GameRecord[] = [
-  {
-    id: "sample-zelda-botw",
-    title: "The Legend of Zelda: Breath of the Wild",
-    price: 278,
-    currency: "CNY",
-    purchaseDate: "2024-10-02",
-    region: "美版",
-    format: "实体卡带",
-    seller: "闲鱼",
-    coverUrl:
-      "https://assets.nintendo.com/image/upload/c_fill,w_1200/q_auto:best/f_auto/dpr_2.0/store/software/switch/70010000000025/7137262b5a64d921e193653f8aa0b722925abc5680380ca0e18a5cfd91697f58",
-    nintendoUrl:
-      "https://www.nintendo.com/us/store/products/the-legend-of-zelda-breath-of-the-wild-switch/",
-    notes: "盒说齐全",
-    soldDate: "",
-    soldPrice: 0,
-    soldCurrency: "CNY",
-  },
-  {
-    id: "sample-mario-kart",
-    title: "Mario Kart 8 Deluxe",
-    price: 249,
-    currency: "CNY",
-    purchaseDate: "2025-01-18",
-    region: "港版",
-    format: "实体卡带",
-    seller: "淘宝",
-    coverUrl:
-      "https://assets.nintendo.com/image/upload/c_fill,w_1200/q_auto:best/f_auto/dpr_2.0/store/software/switch/70010000000153/de697f487a36d802dd9a5ff0341f717c8486221f2f1219b675af37aca63bc453",
-    nintendoUrl:
-      "https://www.nintendo.com/us/store/products/mario-kart-8-deluxe-switch/",
-    notes: "和手柄一起入手",
-    soldDate: "2025-06-12",
-    soldPrice: 218,
-    soldCurrency: "CNY",
-  },
-];
 
 const emptyForm: FormState = {
   title: "",
@@ -105,6 +94,15 @@ const emptyForm: FormState = {
   soldDate: "",
   soldPrice: 0,
   soldCurrency: "CNY",
+  playTimeMinutes: 0,
+  playTimeUpdatedAt: "",
+  firstPlayedDate: "",
+  lastPlayedDate: "",
+};
+
+const emptyAccountForm: AccountFormState = {
+  displayName: "",
+  friendCode: "",
 };
 
 const currencyFormatter = new Intl.NumberFormat("zh-CN", {
@@ -145,6 +143,22 @@ function formatCurrencyStats(
     .join(" / ");
 }
 
+function formatPlayTime(minutes: number) {
+  const normalized = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(normalized / 60);
+  const restMinutes = normalized % 60;
+
+  if (!hours) {
+    return `${restMinutes}分钟`;
+  }
+
+  if (!restMinutes) {
+    return `${hours}小时`;
+  }
+
+  return `${hours}小时${restMinutes}分钟`;
+}
+
 function coverLabel(title: string) {
   return title
     .split(/\s+/)
@@ -164,6 +178,15 @@ function coverSourceLabel(source: NintendoCoverResult["source"]) {
   }[source];
 }
 
+function saveStatusLabel(status: SaveStatus) {
+  return {
+    idle: "",
+    saving: "保存中",
+    saved: "已保存",
+    error: "保存失败",
+  }[status];
+}
+
 function todayString() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -174,10 +197,19 @@ function createEmptyForm() {
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [records, setRecords] = useState<GameRecord[]>(starterRecords);
+  const playtimeInputRef = useRef<HTMLInputElement>(null);
+  const saveRequestRef = useRef(0);
+  const [records, setRecords] = useState<GameRecord[]>([]);
+  const [account, setAccount] = useState<NintendoAccountBinding | null>(null);
+  const [accountForm, setAccountForm] =
+    useState<AccountFormState>(emptyAccountForm);
+  const [playtimeImportError, setPlaytimeImportError] = useState("");
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
+  const [recordsDirty, setRecordsDirty] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [storageError, setStorageError] = useState("");
   const [accessStatus, setAccessStatus] = useState<AccessStatus>("checking");
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -187,11 +219,51 @@ export default function Home() {
   const [coverStatus, setCoverStatus] = useState<"idle" | "searching">("idle");
   const [coverError, setCoverError] = useState("");
 
-  const unlockLedger = useCallback(() => {
-    setRecords(loadInitialRecords());
-    setForm(createEmptyForm());
-    setStorageReady(true);
+  const unlockLedger = useCallback(async () => {
+    saveRequestRef.current += 1;
     setAccessStatus("unlocked");
+    setStorageReady(false);
+    setStorageError("");
+    setSaveStatus("idle");
+
+    try {
+      const serverLedger = await fetchLedgerFromServer();
+      const serverRecords = serverLedger.records;
+      const legacyRecords = loadLegacyLocalRecords();
+      const nextRecords =
+        serverRecords.length || !legacyRecords.length
+          ? serverRecords
+          : legacyRecords;
+
+      const shouldMigrateLegacyRecords =
+        !serverRecords.length && legacyRecords.length > 0;
+
+      setRecords(nextRecords);
+      setAccount(serverLedger.account);
+      setAccountForm(
+        serverLedger.account
+          ? {
+              displayName: serverLedger.account.displayName,
+              friendCode: serverLedger.account.friendCode,
+            }
+          : emptyAccountForm,
+      );
+      setRecordsDirty(shouldMigrateLegacyRecords);
+      if (shouldMigrateLegacyRecords) {
+        setSaveStatus("saving");
+      }
+      setForm(createEmptyForm());
+      setStorageReady(true);
+    } catch (error) {
+      setRecords([]);
+      setAccount(null);
+      setAccountForm(emptyAccountForm);
+      setRecordsDirty(false);
+      setStorageError(
+        error instanceof Error ? error.message : "无法读取服务端记录",
+      );
+      setStorageReady(false);
+    }
   }, []);
 
   const checkAccess = useCallback(async () => {
@@ -200,7 +272,7 @@ export default function Home() {
       const payload = (await response.json()) as { authenticated?: boolean };
 
       if (payload.authenticated) {
-        unlockLedger();
+        await unlockLedger();
       } else {
         setAccessStatus("locked");
       }
@@ -218,12 +290,33 @@ export default function Home() {
   }, [checkAccess]);
 
   useEffect(() => {
-    if (!storageReady) {
+    if (!storageReady || !recordsDirty) {
       return;
     }
 
-    window.localStorage.setItem(storageKey, JSON.stringify(records));
-  }, [records, storageReady]);
+    const requestId = saveRequestRef.current + 1;
+    saveRequestRef.current = requestId;
+    const timeoutId = window.setTimeout(() => {
+      saveLedgerToServer(records, account)
+        .then(() => {
+          if (saveRequestRef.current === requestId) {
+            setRecordsDirty(false);
+            setSaveStatus("saved");
+            setStorageError("");
+          }
+        })
+        .catch((error) => {
+          if (saveRequestRef.current === requestId) {
+            setSaveStatus("error");
+            setStorageError(
+              error instanceof Error ? error.message : "保存服务端记录失败",
+            );
+          }
+        });
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [account, records, recordsDirty, storageReady]);
 
   async function submitPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -248,7 +341,7 @@ export default function Home() {
       }
 
       setPassword("");
-      unlockLedger();
+      await unlockLedger();
     } catch {
       setPasswordError("无法验证密码，请稍后重试");
     }
@@ -256,7 +349,15 @@ export default function Home() {
 
   async function lockLedger() {
     await fetch("/api/access", { method: "DELETE" }).catch(() => undefined);
+    saveRequestRef.current += 1;
+    setRecords([]);
+    setAccount(null);
+    setAccountForm(emptyAccountForm);
+    setPlaytimeImportError("");
+    setRecordsDirty(false);
     setStorageReady(false);
+    setStorageError("");
+    setSaveStatus("idle");
     setAccessStatus("locked");
     setEditingId(null);
     setPassword("");
@@ -272,6 +373,7 @@ export default function Home() {
             record.format,
             record.seller,
             record.notes,
+            record.playTimeMinutes ? formatPlayTime(record.playTimeMinutes) : "",
             record.soldDate ? "已卖出" : "持有中",
           ]
             .join(" ")
@@ -333,6 +435,10 @@ export default function Home() {
   ).length;
   const digitalCount = records.length - physicalCount;
   const soldCount = records.filter((record) => record.soldDate).length;
+  const totalPlayTimeMinutes = records.reduce(
+    (sum, record) => sum + record.playTimeMinutes,
+    0,
+  );
 
   function updateForm<Key extends keyof FormState>(
     key: Key,
@@ -365,6 +471,12 @@ export default function Home() {
           ? Number(form.soldPrice) || 0
           : 0,
       soldCurrency: form.soldCurrency,
+      playTimeMinutes: Math.max(0, Math.round(Number(form.playTimeMinutes) || 0)),
+      playTimeUpdatedAt: form.playTimeMinutes
+        ? form.playTimeUpdatedAt || new Date().toISOString()
+        : "",
+      firstPlayedDate: form.firstPlayedDate,
+      lastPlayedDate: form.lastPlayedDate,
     };
 
     if (!normalized.title) {
@@ -380,6 +492,8 @@ export default function Home() {
     } else {
       setRecords((current) => [{ ...normalized, id: createId() }, ...current]);
     }
+    setRecordsDirty(true);
+    setSaveStatus("saving");
 
     resetForm();
   }
@@ -400,6 +514,10 @@ export default function Home() {
       soldDate: record.soldDate,
       soldPrice: record.soldPrice,
       soldCurrency: record.soldCurrency,
+      playTimeMinutes: record.playTimeMinutes,
+      playTimeUpdatedAt: record.playTimeUpdatedAt,
+      firstPlayedDate: record.firstPlayedDate,
+      lastPlayedDate: record.lastPlayedDate,
     });
   }
 
@@ -434,13 +552,24 @@ export default function Home() {
 
   function deleteRecord(recordId: string) {
     setRecords((current) => current.filter((record) => record.id !== recordId));
+    setRecordsDirty(true);
+    setSaveStatus("saving");
     if (editingId === recordId) {
       resetForm();
     }
   }
 
   function exportRecords() {
-    const payload = JSON.stringify(records, null, 2);
+    const payload = JSON.stringify(
+      {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        account,
+        records,
+      },
+      null,
+      2,
+    );
     const blob = new Blob([payload], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -462,11 +591,17 @@ export default function Home() {
 
     try {
       const parsed = JSON.parse(await file.text()) as unknown;
-      if (!Array.isArray(parsed)) {
+      const parsedRecords = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === "object" && "records" in parsed
+          ? (parsed as { records?: unknown }).records
+          : null;
+
+      if (!Array.isArray(parsedRecords)) {
         throw new Error("Expected an array");
       }
 
-      const importedRecords = parsed
+      const importedRecords = parsedRecords
         .map(normalizeImportedRecord)
         .filter((record): record is GameRecord => Boolean(record));
 
@@ -475,9 +610,93 @@ export default function Home() {
       }
 
       setRecords(importedRecords);
+      setRecordsDirty(true);
+      setSaveStatus("saving");
       resetForm();
     } catch {
       window.alert("JSON 文件不是有效的 Switch 卡带记录");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function saveAccountBinding() {
+    const displayName = accountForm.displayName.trim();
+    const friendCode = accountForm.friendCode.trim().toUpperCase();
+
+    if (!displayName && !friendCode) {
+      setAccount(null);
+    } else {
+      setAccount((current) => ({
+        displayName,
+        friendCode,
+        linkedAt: current?.linkedAt || new Date().toISOString(),
+        playtimeUpdatedAt: current?.playtimeUpdatedAt || "",
+      }));
+    }
+
+    setRecordsDirty(true);
+    setSaveStatus("saving");
+  }
+
+  function choosePlaytimeFile() {
+    playtimeInputRef.current?.click();
+  }
+
+  async function importPlaytime(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const entries = parsePlaytimeImport(await file.text());
+      const now = new Date().toISOString();
+      let matched = 0;
+      const nextRecords = records.map((record) => {
+        const entry = findPlaytimeMatch(record.title, entries);
+
+        if (!entry) {
+          return record;
+        }
+
+        matched += 1;
+        return {
+          ...record,
+          playTimeMinutes: entry.playTimeMinutes,
+          playTimeUpdatedAt: now,
+          firstPlayedDate: entry.firstPlayedDate || record.firstPlayedDate,
+          lastPlayedDate: entry.lastPlayedDate || record.lastPlayedDate,
+        };
+      });
+
+      if (!matched) {
+        throw new Error("没有匹配到现有游戏");
+      }
+
+      setRecords(nextRecords);
+      const nextDisplayName =
+        accountForm.displayName.trim() || account?.displayName || "";
+      const nextFriendCode =
+        accountForm.friendCode.trim().toUpperCase() || account?.friendCode || "";
+
+      setAccount(
+        nextDisplayName || nextFriendCode
+          ? {
+              displayName: nextDisplayName,
+              friendCode: nextFriendCode,
+              linkedAt: account?.linkedAt || now,
+              playtimeUpdatedAt: now,
+            }
+          : null,
+      );
+      setPlaytimeImportError(`已匹配 ${matched} 个游戏`);
+      setRecordsDirty(true);
+      setSaveStatus("saving");
+    } catch (error) {
+      setPlaytimeImportError(
+        error instanceof Error ? error.message : "游玩时长文件无法读取",
+      );
     } finally {
       event.target.value = "";
     }
@@ -596,17 +815,30 @@ export default function Home() {
                 游戏购买记录
               </h1>
             </div>
-            <button
-              className="ghost-button self-start sm:self-center"
-              type="button"
-              onClick={lockLedger}
-            >
-              锁定
-            </button>
+            <div className="flex items-center gap-3 self-start sm:self-center">
+              {saveStatusLabel(saveStatus) ? (
+                <span
+                  className={`text-sm font-semibold ${
+                    saveStatus === "error" ? "text-[#b42323]" : "text-[#4e5968]"
+                  }`}
+                >
+                  {saveStatusLabel(saveStatus)}
+                </span>
+              ) : null}
+              <button className="ghost-button" type="button" onClick={lockLedger}>
+                锁定
+              </button>
+            </div>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+          {storageError ? (
+            <p className="mt-3 rounded-md bg-[#fff2cf] px-3 py-2 text-sm font-semibold text-[#755900]">
+              {storageError}
+            </p>
+          ) : null}
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 xl:grid-cols-5">
             <Stat label="游戏数" value={`${records.length}`} />
             <Stat label="实体 / 数字" value={`${physicalCount} / ${digitalCount}`} />
+            <Stat label="总时长" value={formatPlayTime(totalPlayTimeMinutes)} />
             <Stat
               label="总支出"
               value={formatCurrencyStats(currencyStats, "total")}
@@ -618,7 +850,8 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+        {storageReady ? (
+          <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
           <form
             onSubmit={handleSubmit}
             className="h-fit rounded-lg border border-[#d7dde6] bg-white p-3 shadow-sm sm:p-4 xl:sticky xl:top-5"
@@ -748,6 +981,42 @@ export default function Home() {
                 />
               </label>
 
+              <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr]">
+                <label className="field">
+                  <span>游玩分钟</span>
+                  <input
+                    min="0"
+                    step="1"
+                    type="number"
+                    value={form.playTimeMinutes || ""}
+                    onChange={(event) =>
+                      updateForm("playTimeMinutes", Number(event.target.value))
+                    }
+                    placeholder="0"
+                  />
+                </label>
+                <label className="field">
+                  <span>首次游玩</span>
+                  <input
+                    type="date"
+                    value={form.firstPlayedDate}
+                    onChange={(event) =>
+                      updateForm("firstPlayedDate", event.target.value)
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>最后游玩</span>
+                  <input
+                    type="date"
+                    value={form.lastPlayedDate}
+                    onChange={(event) =>
+                      updateForm("lastPlayedDate", event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="field">
                   <span>版本</span>
@@ -873,6 +1142,66 @@ export default function Home() {
           </form>
 
           <section className="flex min-w-0 flex-col gap-4">
+            <div className="grid gap-3 rounded-lg border border-[#d7dde6] bg-white p-3 shadow-sm sm:p-4 lg:grid-cols-[minmax(0,1fr)_180px_auto_auto] lg:items-end">
+              <label className="field">
+                <span>任天堂账号</span>
+                <input
+                  value={accountForm.displayName}
+                  onChange={(event) =>
+                    setAccountForm((current) => ({
+                      ...current,
+                      displayName: event.target.value,
+                    }))
+                  }
+                  placeholder="账号昵称"
+                />
+              </label>
+              <label className="field">
+                <span>好友代码</span>
+                <input
+                  value={accountForm.friendCode}
+                  onChange={(event) =>
+                    setAccountForm((current) => ({
+                      ...current,
+                      friendCode: event.target.value,
+                    }))
+                  }
+                  placeholder="SW-0000-0000-0000"
+                />
+              </label>
+              <button
+                className="ghost-button w-full lg:w-auto"
+                type="button"
+                onClick={saveAccountBinding}
+              >
+                保存绑定
+              </button>
+              <button
+                className="secondary-button w-full lg:w-auto"
+                type="button"
+                onClick={choosePlaytimeFile}
+              >
+                导入时长
+              </button>
+              <input
+                ref={playtimeInputRef}
+                accept=".json,.csv,text/csv,application/json"
+                className="hidden"
+                type="file"
+                onChange={importPlaytime}
+              />
+              {account || playtimeImportError ? (
+                <p className="text-sm font-semibold text-[#4e5968] lg:col-span-4">
+                  {playtimeImportError ||
+                    `${account?.displayName || account?.friendCode || "已绑定"}${
+                      account?.playtimeUpdatedAt
+                        ? ` · ${account.playtimeUpdatedAt.slice(0, 10)}`
+                        : ""
+                    }`}
+                </p>
+              ) : null}
+            </div>
+
             <div className="grid gap-3 rounded-lg border border-[#d7dde6] bg-white p-3 shadow-sm sm:p-4 md:grid-cols-[minmax(0,1fr)_160px_auto_auto] md:items-end">
               <label className="field">
                 <span>搜索</span>
@@ -944,6 +1273,14 @@ export default function Home() {
                         {record.purchaseDate} · {record.format}
                         {record.seller ? ` · ${record.seller}` : ""}
                       </p>
+                      {record.playTimeMinutes ? (
+                        <p className="mt-1 text-sm font-semibold text-[#287b58]">
+                          游玩 {formatPlayTime(record.playTimeMinutes)}
+                          {record.lastPlayedDate
+                            ? ` · ${record.lastPlayedDate}`
+                            : ""}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="grid gap-3 border-t border-[#eee8dc] pt-3">
                       <div className="flex flex-wrap items-end justify-between gap-2">
@@ -966,10 +1303,16 @@ export default function Home() {
                           </div>
                         ) : null}
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div
+                        className={`grid gap-2 ${
+                          record.format === "实体卡带" && !record.soldDate
+                            ? "grid-cols-3"
+                            : "grid-cols-2"
+                        }`}
+                      >
                         {record.format === "实体卡带" && !record.soldDate ? (
                           <button
-                            className="secondary-button flex-1 basis-[calc(50%-0.25rem)] sm:flex-none sm:basis-auto"
+                            className="secondary-button min-w-0 px-2"
                             type="button"
                             onClick={() => startSaleRecord(record)}
                           >
@@ -977,14 +1320,14 @@ export default function Home() {
                           </button>
                         ) : null}
                         <button
-                          className="ghost-button flex-1 basis-[calc(50%-0.25rem)] sm:flex-none sm:basis-auto"
+                          className="ghost-button min-w-0 px-2"
                           type="button"
                           onClick={() => editRecord(record)}
                         >
                           编辑
                         </button>
                         <button
-                          className="danger-button flex-1 basis-[calc(50%-0.25rem)] sm:flex-none sm:basis-auto"
+                          className="danger-button min-w-0 px-2"
                           type="button"
                           onClick={() => deleteRecord(record.id)}
                         >
@@ -1008,7 +1351,12 @@ export default function Home() {
               </div>
             ) : null}
           </section>
-        </section>
+          </section>
+        ) : (
+          <section className="rounded-lg border border-[#d7dde6] bg-white p-8 text-center text-sm font-semibold text-[#4e5968] shadow-sm">
+            {storageError || "正在加载记录"}
+          </section>
+        )}
       </div>
     </main>
   );
@@ -1074,32 +1422,367 @@ function normalizeImportedRecord(value: unknown): GameRecord | null {
     soldDate,
     soldPrice: soldDate ? Number(record.soldPrice) || 0 : 0,
     soldCurrency,
+    playTimeMinutes: Math.max(0, Math.round(Number(record.playTimeMinutes) || 0)),
+    playTimeUpdatedAt:
+      typeof record.playTimeUpdatedAt === "string" ? record.playTimeUpdatedAt : "",
+    firstPlayedDate:
+      typeof record.firstPlayedDate === "string" ? record.firstPlayedDate : "",
+    lastPlayedDate:
+      typeof record.lastPlayedDate === "string" ? record.lastPlayedDate : "",
   };
 }
 
-function loadInitialRecords() {
+function normalizeAccountBinding(value: unknown): NintendoAccountBinding | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const accountValue = value as Partial<NintendoAccountBinding>;
+  const displayName =
+    typeof accountValue.displayName === "string"
+      ? accountValue.displayName.trim()
+      : "";
+  const friendCode =
+    typeof accountValue.friendCode === "string"
+      ? accountValue.friendCode.trim().toUpperCase()
+      : "";
+
+  if (!displayName && !friendCode) {
+    return null;
+  }
+
+  return {
+    displayName,
+    friendCode,
+    linkedAt:
+      typeof accountValue.linkedAt === "string" && accountValue.linkedAt
+        ? accountValue.linkedAt
+        : new Date().toISOString(),
+    playtimeUpdatedAt:
+      typeof accountValue.playtimeUpdatedAt === "string"
+        ? accountValue.playtimeUpdatedAt
+        : "",
+  };
+}
+
+async function fetchLedgerFromServer(): Promise<LedgerDocument> {
+  const response = await fetch("/api/records", { cache: "no-store" });
+  const payload = (await response.json().catch(() => ({}))) as
+    | Partial<LedgerDocument>
+    | { error?: string };
+
+  if (!response.ok) {
+    throw new Error(
+      "error" in payload && payload.error ? payload.error : "无法读取服务端记录",
+    );
+  }
+
+  const records = "records" in payload ? payload.records : null;
+
+  return {
+    version: 1,
+    updatedAt:
+      "updatedAt" in payload && typeof payload.updatedAt === "string"
+        ? payload.updatedAt
+        : "",
+    account:
+      "account" in payload ? normalizeAccountBinding(payload.account) : null,
+    records: Array.isArray(records)
+      ? records
+          .map(normalizeImportedRecord)
+          .filter((record): record is GameRecord => Boolean(record))
+      : [],
+  };
+}
+
+async function saveLedgerToServer(
+  records: GameRecord[],
+  account: NintendoAccountBinding | null,
+) {
+  const response = await fetch("/api/records", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account, records }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error || "保存服务端记录失败");
+  }
+}
+
+function parsePlaytimeImport(text: string): PlaytimeImportEntry[] {
+  const trimmed = text.trim();
+  const entries = trimmed.startsWith("{") || trimmed.startsWith("[")
+    ? parsePlaytimeJson(trimmed)
+    : parsePlaytimeCsv(trimmed);
+
+  if (!entries.length) {
+    throw new Error("没有读取到游玩时长");
+  }
+
+  return entries;
+}
+
+function parsePlaytimeJson(text: string) {
+  const parsed = JSON.parse(text) as unknown;
+  const source = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object"
+      ? (parsed as {
+          records?: unknown;
+          games?: unknown;
+          activities?: unknown;
+          playActivity?: unknown;
+        }).records ??
+        (parsed as { games?: unknown }).games ??
+        (parsed as { activities?: unknown }).activities ??
+        (parsed as { playActivity?: unknown }).playActivity
+      : null;
+
+  if (!Array.isArray(source)) {
+    return [];
+  }
+
+  return source
+    .map(parsePlaytimeEntry)
+    .filter((entry): entry is PlaytimeImportEntry => Boolean(entry));
+}
+
+function parsePlaytimeCsv(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const cells = splitCsvLine(line);
+      const title = cells[0]?.trim() ?? "";
+      const playTimeValue = cells[1]?.trim() ?? "";
+
+      if (
+        index === 0 &&
+        /title|name|游戏|名稱|名称/i.test(title) &&
+        /time|hour|minute|时长|時間|分钟|小時/i.test(playTimeValue)
+      ) {
+        return null;
+      }
+
+      const playTimeMinutes = parsePlayTimeValue(playTimeValue);
+      if (!title || !playTimeMinutes) {
+        return null;
+      }
+
+      return {
+        title,
+        playTimeMinutes,
+        firstPlayedDate: normalizeDate(cells[2]),
+        lastPlayedDate: normalizeDate(cells[3]),
+      };
+    })
+    .filter((entry): entry is PlaytimeImportEntry => Boolean(entry));
+}
+
+function splitCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  cells.push(current);
+  return cells;
+}
+
+function parsePlaytimeEntry(value: unknown): PlaytimeImportEntry | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const title = firstString(
+    record.title,
+    record.name,
+    record.gameTitle,
+    record.softwareName,
+  );
+  const directMinutes = firstNumber(
+    record.playTimeMinutes,
+    record.totalMinutes,
+    record.minutes,
+  );
+  const directHours = firstNumber(
+    record.playTimeHours,
+    record.totalHours,
+    record.hours,
+  );
+  const textMinutes = parsePlayTimeValue(
+    firstString(record.playTime, record.totalTimePlayed, record.timePlayed),
+  );
+  const playTimeMinutes =
+    directMinutes ?? (directHours ? Math.round(directHours * 60) : textMinutes);
+
+  if (!title || !playTimeMinutes) {
+    return null;
+  }
+
+  return {
+    title,
+    playTimeMinutes,
+    firstPlayedDate: normalizeDate(
+      firstString(record.firstPlayedDate, record.firstPlayedAt),
+    ),
+    lastPlayedDate: normalizeDate(
+      firstString(record.lastPlayedDate, record.lastPlayedAt, record.updatedAt),
+    ),
+  };
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    const numberValue =
+      typeof value === "number"
+        ? value
+        : typeof value === "string"
+          ? Number(value)
+          : NaN;
+
+    if (Number.isFinite(numberValue) && numberValue > 0) {
+      return numberValue;
+    }
+  }
+
+  return null;
+}
+
+function parsePlayTimeValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.round(value));
+  }
+
+  if (typeof value !== "string") {
+    return 0;
+  }
+
+  const text = value.trim().toLowerCase();
+  const timeParts = text.match(/^(\d{1,5}):(\d{1,2})$/);
+  if (timeParts) {
+    return Number(timeParts[1]) * 60 + Number(timeParts[2]);
+  }
+
+  const hours =
+    Number(text.match(/(\d+(?:\.\d+)?)\s*(?:小时|小時|h|hour|hours)/)?.[1]) ||
+    0;
+  const minutes =
+    Number(text.match(/(\d+(?:\.\d+)?)\s*(?:分钟|分鐘|m|min|minute|minutes)/)?.[1]) ||
+    0;
+
+  if (hours || minutes) {
+    return Math.max(0, Math.round(hours * 60 + minutes));
+  }
+
+  const rawNumber = Number(text);
+  return Number.isFinite(rawNumber) ? Math.max(0, Math.round(rawNumber)) : 0;
+}
+
+function normalizeDate(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    return "";
+  }
+
+  const match = value.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/);
+  if (!match) {
+    return "";
+  }
+
+  const [year, month, day] = match[0].split(/[-/.]/);
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function findPlaytimeMatch(
+  title: string,
+  entries: PlaytimeImportEntry[],
+) {
+  const normalizedTitle = normalizeGameTitle(title);
+
+  return entries.find((entry) => {
+    const normalizedEntryTitle = normalizeGameTitle(entry.title);
+    return (
+      normalizedEntryTitle === normalizedTitle ||
+      normalizedEntryTitle.includes(normalizedTitle) ||
+      normalizedTitle.includes(normalizedEntryTitle)
+    );
+  });
+}
+
+function normalizeGameTitle(title: string) {
+  return title
+    .normalize("NFKC")
+    .replaceAll("萨尔达", "塞尔达")
+    .replaceAll("薩爾達", "塞尔达")
+    .replaceAll("玛利欧", "马力欧")
+    .replaceAll("瑪利歐", "马力欧")
+    .replaceAll("马里奥", "马力欧")
+    .replace(/[™®©]/g, "")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "")
+    .toLowerCase();
+}
+
+function loadLegacyLocalRecords() {
   if (typeof window === "undefined") {
-    return starterRecords;
+    return [];
   }
 
   const raw = window.localStorage.getItem(storageKey);
   if (!raw) {
-    return starterRecords;
+    return [];
   }
 
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return starterRecords;
+    const parsedRecords = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object" && "records" in parsed
+        ? (parsed as { records?: unknown }).records
+        : null;
+
+    if (!Array.isArray(parsedRecords)) {
+      return [];
     }
 
-    const records = parsed
+    const records = parsedRecords
       .map(normalizeImportedRecord)
       .filter((record): record is GameRecord => Boolean(record));
 
-    return records.length ? records : starterRecords;
+    return records;
   } catch {
     window.localStorage.removeItem(storageKey);
-    return starterRecords;
+    return [];
   }
 }

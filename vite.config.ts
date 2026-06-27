@@ -8,10 +8,17 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
 
 const { d1, r2 } = hostingConfig;
+const localVars = Object.fromEntries(
+  [
+    ["APP_ACCESS_PASSWORD", process.env.APP_ACCESS_PASSWORD],
+    ["APP_ACCESS_SESSION_SECRET", process.env.APP_ACCESS_SESSION_SECRET],
+  ].filter((item): item is [string, string] => Boolean(item[1])),
+);
 
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  vars: localVars,
   d1_databases: d1
     ? [
         {
@@ -34,10 +41,10 @@ const localBindingConfig = {
 export default defineConfig({
   plugins: [
     vinext(),
-    sites(),
     cloudflare({
       viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
       config: localBindingConfig,
     }),
+    sites(),
   ],
 });
