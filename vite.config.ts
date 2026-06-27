@@ -15,36 +15,41 @@ const localVars = Object.fromEntries(
   ].filter((item): item is [string, string] => Boolean(item[1])),
 );
 
-const localBindingConfig = {
-  main: "./worker/index.ts",
-  compatibility_flags: ["nodejs_compat"],
-  vars: localVars,
-  d1_databases: d1
-    ? [
-        {
-          binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
-        },
-      ]
-    : [],
-  r2_buckets: r2
-    ? [
-        {
-          binding: r2,
-          bucket_name: "site-creator-r2",
-        },
-      ]
-    : [],
-};
+export default defineConfig(({ command }) => {
+  const includeLocalBindings = command === "serve";
+  const localBindingConfig = {
+    main: "./worker/index.ts",
+    compatibility_flags: ["nodejs_compat"],
+    vars: localVars,
+    d1_databases:
+      includeLocalBindings && d1
+        ? [
+            {
+              binding: d1,
+              database_name: "site-creator-d1",
+              database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+            },
+          ]
+        : [],
+    r2_buckets:
+      includeLocalBindings && r2
+        ? [
+            {
+              binding: r2,
+              bucket_name: "site-creator-r2",
+            },
+          ]
+        : [],
+  };
 
-export default defineConfig({
-  plugins: [
-    vinext(),
-    cloudflare({
-      viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-      config: localBindingConfig,
-    }),
-    sites(),
-  ],
+  return {
+    plugins: [
+      vinext(),
+      cloudflare({
+        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
+        config: localBindingConfig,
+      }),
+      sites(),
+    ],
+  };
 });

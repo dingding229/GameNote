@@ -1,5 +1,3 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { hasValidAccessCookie } from "@/lib/access";
 import {
@@ -15,8 +13,6 @@ type SavePayload = {
   account?: unknown;
   records?: unknown;
 };
-
-export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
   if (!(await hasValidAccessCookie(request))) {
@@ -64,8 +60,10 @@ function unauthorized() {
 }
 
 async function readLedger(): Promise<LedgerDocument> {
+  const { readFile } = await loadFsPromises();
+
   try {
-    const raw = await readFile(dataFilePath(), "utf8");
+    const raw = await readFile(await dataFilePath(), "utf8");
     return normalizeLedgerDocument(JSON.parse(raw) as unknown);
   } catch (error) {
     if (isNotFoundError(error)) {
@@ -77,9 +75,10 @@ async function readLedger(): Promise<LedgerDocument> {
 }
 
 async function writeLedger(document: LedgerDocument) {
-  const filePath = dataFilePath();
-  const directory = dirname(filePath);
-  const tempPath = join(
+  const { mkdir, rename, writeFile } = await loadFsPromises();
+  const filePath = await dataFilePath();
+  const directory = dirnamePath(filePath);
+  const tempPath = joinPath(
     directory,
     `.${Date.now()}-${Math.random().toString(16).slice(2)}.records.tmp`,
   );
@@ -89,15 +88,62 @@ async function writeLedger(document: LedgerDocument) {
   await rename(tempPath, filePath);
 }
 
-function dataFilePath() {
+async function loadFsPromises(): Promise<{
+  mkdir(path: string, options: { recursive: boolean }): Promise<unknown>;
+  readFile(path: string, encoding: "utf8"): Promise<string>;
+  rename(oldPath: string, newPath: string): Promise<unknown>;
+  writeFile(path: string, data: string, encoding: "utf8"): Promise<unknown>;
+}> {
+  const nodeImport = new Function("specifier", "return import(specifier)") as (
+    specifier: string,
+  ) => Promise<{
+    mkdir(path: string, options: { recursive: boolean }): Promise<unknown>;
+    readFile(path: string, encoding: "utf8"): Promise<string>;
+    rename(oldPath: string, newPath: string): Promise<unknown>;
+    writeFile(path: string, data: string, encoding: "utf8"): Promise<unknown>;
+  }>;
+
+  return nodeImport(["node:", "fs", "/", "promises"].join(""));
+}
+
+function isAbsolutePath(path: string) {
+  return path.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(path);
+}
+
+function dirnamePath(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  const index = normalized.lastIndexOf("/");
+
+  if (index < 0) {
+    return ".";
+  }
+
+  if (index === 0) {
+    return "/";
+  }
+
+  return normalized.slice(0, index);
+}
+
+function joinPath(directory: string, fileName: string) {
+  return directory.endsWith("/")
+    ? `${directory}${fileName}`
+    : `${directory}/${fileName}`;
+}
+
+function joinDataPath(fileName: string) {
+  return `data/${fileName}`;
+}
+
+async function dataFilePath() {
   const configured =
     process.env.APP_DATA_FILE || process.env.SWITCH_LEDGER_DATA_FILE;
 
   if (!configured) {
-    return join("data", "records.json");
+    return joinDataPath("records.json");
   }
 
-  if (isAbsolute(configured)) {
+  if (isAbsolutePath(configured)) {
     return configured;
   }
 
@@ -107,10 +153,10 @@ function dataFilePath() {
     .replace(/^data\//, "");
 
   if (relativePath.split("/").includes("..")) {
-    return join("data", "records.json");
+    return joinDataPath("records.json");
   }
 
-  return join("data", relativePath);
+  return joinDataPath(relativePath);
 }
 
 function isNotFoundError(error: unknown) {
