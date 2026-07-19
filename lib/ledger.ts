@@ -1,9 +1,11 @@
-export type Region = "日版" | "港版" | "美版" | "欧版" | "其他";
-export type GameFormat = "实体卡带" | "数字版";
-export type Currency = "CNY" | "JPY" | "HKD" | "USD";
+export type Region = "日版" | "港版" | "台版" | "美版" | "欧版" | "其他";
+export type GamePlatform = "Nintendo Switch" | "PlayStation";
+export type GameFormat = "实体卡带" | "实体光盘" | "数字版";
+export type Currency = "CNY" | "JPY" | "HKD" | "USD" | "EUR" | "BRL";
 
 export type GameRecord = {
   id: string;
+  platform: GamePlatform;
   title: string;
   price: number;
   currency: Currency;
@@ -12,52 +14,36 @@ export type GameRecord = {
   format: GameFormat;
   seller: string;
   coverUrl: string;
-  nintendoUrl: string;
+  officialUrl: string;
   notes: string;
   soldDate: string;
   soldPrice: number;
   soldCurrency: Currency;
-  playTimeMinutes: number;
-  playTimeUpdatedAt: string;
-  firstPlayedDate: string;
-  lastPlayedDate: string;
-};
-
-export type NintendoAccountBinding = {
-  displayName: string;
-  friendCode: string;
-  linkedAt: string;
-  playtimeUpdatedAt: string;
 };
 
 export type LedgerDocument = {
   version: 1;
   updatedAt: string;
-  account: NintendoAccountBinding | null;
   records: GameRecord[];
 };
 
-export const currencies = ["CNY", "JPY", "HKD", "USD"] as const;
-export const regions = ["日版", "港版", "美版", "欧版", "其他"] as const;
-export const gameFormats = ["实体卡带", "数字版"] as const;
+export const currencies = ["CNY", "JPY", "HKD", "USD", "EUR", "BRL"] as const;
+export const gamePlatforms = ["Nintendo Switch", "PlayStation"] as const;
+export const regions = ["日版", "港版", "台版", "美版", "欧版", "其他"] as const;
+export const gameFormats = ["实体卡带", "实体光盘", "数字版"] as const;
 
 export function createEmptyLedger(): LedgerDocument {
   return {
     version: 1,
     updatedAt: new Date(0).toISOString(),
-    account: null,
     records: [],
   };
 }
 
-export function createLedgerDocument(
-  account: NintendoAccountBinding | null,
-  records: GameRecord[],
-): LedgerDocument {
+export function createLedgerDocument(records: GameRecord[]): LedgerDocument {
   return {
     version: 1,
     updatedAt: new Date().toISOString(),
-    account,
     records,
   };
 }
@@ -83,11 +69,6 @@ export function normalizeLedgerDocument(value: unknown): LedgerDocument {
   return {
     version: 1,
     updatedAt: updatedAt || new Date(0).toISOString(),
-    account: normalizeAccount(
-      source && "account" in source
-        ? (source as { account?: unknown }).account
-        : null,
-    ),
     records: Array.isArray(rawRecords) ? normalizeRecords(rawRecords) : [],
   };
 }
@@ -103,24 +84,34 @@ export function normalizeRecord(value: unknown): GameRecord | null {
     return null;
   }
 
-  const record = value as Partial<GameRecord> & { condition?: unknown };
+  const record = value as Partial<GameRecord> & {
+    condition?: unknown;
+    nintendoUrl?: unknown;
+    playstationUrl?: unknown;
+  };
   if (!record.title || typeof record.title !== "string") {
     return null;
   }
 
+  const platform = gamePlatforms.includes(record.platform as GamePlatform)
+    ? (record.platform as GamePlatform)
+    : typeof record.playstationUrl === "string" && record.playstationUrl
+      ? "PlayStation"
+      : "Nintendo Switch";
   const currency = currencies.includes(record.currency as Currency)
     ? (record.currency as Currency)
     : "CNY";
   const region = regions.includes(record.region as Region)
     ? (record.region as Region)
     : "其他";
-  const format = gameFormats.includes(record.format as GameFormat)
+  const rawFormat = gameFormats.includes(record.format as GameFormat)
     ? (record.format as GameFormat)
     : record.condition === "数字版"
       ? "数字版"
-      : "实体卡带";
+      : physicalFormatForPlatform(platform);
+  const format = normalizeFormatForPlatform(rawFormat, platform);
   const soldDate =
-    format === "实体卡带" &&
+    isPhysicalFormat(format) &&
     typeof record.soldDate === "string" &&
     record.soldDate
       ? record.soldDate
@@ -128,9 +119,18 @@ export function normalizeRecord(value: unknown): GameRecord | null {
   const soldCurrency = currencies.includes(record.soldCurrency as Currency)
     ? (record.soldCurrency as Currency)
     : currency;
+  const officialUrl =
+    typeof record.officialUrl === "string"
+      ? record.officialUrl
+      : typeof record.nintendoUrl === "string"
+        ? record.nintendoUrl
+        : typeof record.playstationUrl === "string"
+          ? record.playstationUrl
+          : "";
 
   return {
     id: typeof record.id === "string" ? record.id : createId(),
+    platform,
     title: record.title.trim(),
     price: Number(record.price) || 0,
     currency,
@@ -142,53 +142,31 @@ export function normalizeRecord(value: unknown): GameRecord | null {
     format,
     seller: typeof record.seller === "string" ? record.seller : "",
     coverUrl: typeof record.coverUrl === "string" ? record.coverUrl : "",
-    nintendoUrl: typeof record.nintendoUrl === "string" ? record.nintendoUrl : "",
+    officialUrl,
     notes: typeof record.notes === "string" ? record.notes : "",
     soldDate,
     soldPrice: soldDate ? Number(record.soldPrice) || 0 : 0,
     soldCurrency,
-    playTimeMinutes: Math.max(0, Math.round(Number(record.playTimeMinutes) || 0)),
-    playTimeUpdatedAt:
-      typeof record.playTimeUpdatedAt === "string" ? record.playTimeUpdatedAt : "",
-    firstPlayedDate:
-      typeof record.firstPlayedDate === "string" ? record.firstPlayedDate : "",
-    lastPlayedDate:
-      typeof record.lastPlayedDate === "string" ? record.lastPlayedDate : "",
   };
 }
 
-export function normalizeAccount(
-  value: unknown,
-  fallback: NintendoAccountBinding | null = null,
-): NintendoAccountBinding | null {
-  if (!value || typeof value !== "object") {
-    return fallback;
+export function physicalFormatForPlatform(platform: GamePlatform): GameFormat {
+  return platform === "PlayStation" ? "实体光盘" : "实体卡带";
+}
+
+export function normalizeFormatForPlatform(
+  format: GameFormat,
+  platform: GamePlatform,
+): GameFormat {
+  if (format === "数字版") {
+    return format;
   }
 
-  const account = value as Partial<NintendoAccountBinding>;
-  const displayName =
-    typeof account.displayName === "string" ? account.displayName.trim() : "";
-  const friendCode =
-    typeof account.friendCode === "string"
-      ? account.friendCode.trim().toUpperCase()
-      : "";
+  return physicalFormatForPlatform(platform);
+}
 
-  if (!displayName && !friendCode) {
-    return null;
-  }
-
-  return {
-    displayName,
-    friendCode,
-    linkedAt:
-      typeof account.linkedAt === "string" && account.linkedAt
-        ? account.linkedAt
-        : fallback?.linkedAt || new Date().toISOString(),
-    playtimeUpdatedAt:
-      typeof account.playtimeUpdatedAt === "string"
-        ? account.playtimeUpdatedAt
-        : fallback?.playtimeUpdatedAt || "",
-  };
+export function isPhysicalFormat(format: GameFormat) {
+  return format !== "数字版";
 }
 
 function createId() {

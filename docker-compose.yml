@@ -9,7 +9,9 @@ services:
       - "3000:3000"
     environment:
       APP_ACCESS_PASSWORD: "请修改为你的访问密码"
-      APP_ACCESS_SESSION_SECRET: "请修改为一段更长的随机字符串"
-      APP_DATA_FILE: "/data/records.json"
+      APP_SECRET: "请修改为一段更长的随机字符串"
+      APP_DATABASE_FILE: "/data/records.sqlite"
+      # all/both = NS + PS, ns = 仅统计 NS, ps = 仅统计 PlayStation
+      APP_STATS_PLATFORMS: "all"
     volumes:
       - ./data:/data

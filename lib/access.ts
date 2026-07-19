@@ -3,6 +3,7 @@ import {
   accessCookieName,
   createAccessSessionToken,
   defaultLocalPassword,
+  verifyAccessSessionToken,
 } from "@/lib/access-token";
 
 export { accessCookieName };
@@ -12,12 +13,12 @@ export function getAccessPassword() {
 }
 
 export function getSessionSecret() {
-  return process.env.APP_ACCESS_SESSION_SECRET || getAccessPassword();
+  return process.env.APP_SECRET || getAccessPassword();
 }
 
 export async function hasValidAccessCookie(request: NextRequest) {
   const cookie = request.cookies.get(accessCookieName)?.value ?? "";
-  return cookie === (await createSessionToken());
+  return verifyAccessSessionToken(cookie, getAccessPassword(), getSessionSecret());
 }
 
 export async function createSessionToken() {

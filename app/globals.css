@@ -1,21 +1,52 @@
 @import "tailwindcss";
-
-:root {
-  --background: #f4f7fb;
-  --foreground: #202020;
+@plugin "daisyui" {
+  themes: cupcake --default;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root {
+  color-scheme: light;
+  --color-base-100: oklch(98% 0.018 75);
+  --color-base-200: oklch(95% 0.032 73);
+  --color-base-300: oklch(88% 0.045 63);
+  --color-base-content: oklch(27% 0.045 40);
+  --color-primary: oklch(61% 0.19 34);
+  --color-primary-content: oklch(99% 0.012 72);
+  --color-secondary: oklch(49% 0.13 18);
+  --color-secondary-content: oklch(99% 0.012 72);
+  --color-accent: oklch(72% 0.14 78);
+  --color-accent-content: oklch(25% 0.045 40);
+  --color-neutral: oklch(31% 0.05 36);
+  --color-neutral-content: oklch(97% 0.018 75);
+  --color-info: oklch(58% 0.12 235);
+  --color-info-content: oklch(98% 0.012 75);
+  --color-success: oklch(52% 0.12 150);
+  --color-success-content: oklch(98% 0.012 75);
+  --color-warning: oklch(72% 0.15 75);
+  --color-warning-content: oklch(25% 0.045 40);
+  --color-error: oklch(57% 0.18 28);
+  --color-error-content: oklch(98% 0.012 75);
+  --page-wash-start: oklch(96% 0.045 48);
+  --page-wash-end: oklch(95% 0.038 75);
+  --radius-selector: 1rem;
+  --radius-field: 1rem;
+  --radius-box: 1.5rem;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background:
+    linear-gradient(
+      180deg,
+      var(--page-wash-start) 0,
+      var(--page-wash-end) 18rem
+    ),
+    var(--color-base-200);
+  color: var(--color-base-content);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -34,45 +65,134 @@ button:disabled {
   opacity: 0.62;
 }
 
+.ledger-page,
+.login-screen {
+  background:
+    linear-gradient(
+      180deg,
+      var(--page-wash-start) 0,
+      var(--page-wash-end) 18rem
+    ),
+    var(--color-base-200);
+}
+
+.ledger-header,
+.app-surface,
+.filter-panel,
+.record-card,
+.login-card {
+  background: var(--color-base-100);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-box);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--color-base-content) 10%, transparent);
+}
+
+.ledger-header {
+  color: var(--color-base-content);
+  overflow: hidden;
+  position: relative;
+}
+
+.ledger-header::before {
+  background: var(--color-primary);
+  content: "";
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 0.42rem;
+}
+
+.ledger-kicker {
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.surface-toolbar {
+  background: var(--color-base-200);
+  border-bottom: 1px solid var(--color-base-300);
+}
+
+.filter-panel {
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--color-base-content) 8%, transparent);
+}
+
+.record-card {
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.record-card:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 38%, var(--color-base-300));
+  box-shadow: 0 18px 38px color-mix(in srgb, var(--color-base-content) 12%, transparent);
+  transform: translateY(-1px);
+}
+
+.stat-card {
+  background: var(--color-base-200);
+  border: 1px solid var(--color-base-300);
+  border-radius: calc(var(--radius-field) * 1.08);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-base-100) 70%, transparent);
+}
+
+.stat-card p:first-child {
+  color: color-mix(in srgb, var(--color-base-content) 64%, transparent);
+}
+
+.stat-card p:last-child {
+  color: var(--color-base-content);
+}
+
 .field {
   display: grid;
-  gap: 0.4rem;
+  gap: 0.42rem;
+  min-width: 0;
 }
 
 .field span {
-  color: #4e5968;
+  color: color-mix(in srgb, var(--color-base-content) 68%, transparent);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .field input,
 .field select,
 .field textarea {
-  min-height: 2.6rem;
+  min-height: 2.75rem;
   width: 100%;
-  border: 1px solid #c8d1dc;
-  border-radius: 0.45rem;
-  background: #ffffff;
-  color: #202020;
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-field);
+  background: var(--color-base-100);
+  color: var(--color-base-content);
   outline: none;
-  padding: 0.62rem 0.72rem;
+  padding: 0.66rem 0.76rem;
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease,
     background 120ms ease;
 }
 
+.field select {
+  appearance: auto;
+  min-width: 0;
+  padding-right: 0.5rem;
+  text-overflow: ellipsis;
+}
+
 .field textarea {
-  min-height: 5.5rem;
+  min-height: 5.7rem;
   resize: vertical;
 }
 
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
-  border-color: #d1222a;
-  background: #ffffff;
-  box-shadow: 0 0 0 3px rgb(209 34 42 / 14%);
+  border-color: var(--color-primary);
+  background: var(--color-base-100);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
 .primary-button,
@@ -80,84 +200,143 @@ button:disabled {
 .ghost-button,
 .danger-button {
   align-items: center;
-  border-radius: 0.45rem;
+  border-radius: var(--radius-field);
   display: inline-flex;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   font-weight: 800;
   justify-content: center;
+  min-height: 2.65rem;
   min-width: 0;
-  min-height: 2.55rem;
-  padding: 0.6rem 0.85rem;
+  padding: 0.62rem 0.9rem;
   transition:
     background 120ms ease,
     border-color 120ms ease,
+    box-shadow 120ms ease,
     color 120ms ease,
     transform 120ms ease;
   white-space: nowrap;
 }
 
 .primary-button {
-  background: #e60012;
-  color: white;
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  color: var(--color-primary-content);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 
 .primary-button:hover {
-  background: #c90010;
+  background: color-mix(in srgb, var(--color-primary) 86%, var(--color-secondary));
 }
 
 .secondary-button {
-  border: 1px solid #202020;
-  background: #202020;
-  color: #ffffff;
+  background: color-mix(in srgb, var(--color-secondary) 12%, var(--color-base-100));
+  border: 1px solid color-mix(in srgb, var(--color-secondary) 34%, var(--color-base-300));
+  color: var(--color-secondary);
 }
 
 .secondary-button:hover {
-  background: #313946;
+  background: color-mix(in srgb, var(--color-secondary) 18%, var(--color-base-100));
+  border-color: var(--color-secondary);
 }
 
 .ghost-button {
-  border: 1px solid #c8d1dc;
-  background: #ffffff;
-  color: #202020;
+  background: var(--color-base-100);
+  border: 1px solid var(--color-base-300);
+  color: var(--color-base-content);
 }
 
 .ghost-button:hover {
-  border-color: #94a3b8;
-  background: #f6f9fc;
+  background: var(--color-base-200);
+  border-color: color-mix(in srgb, var(--color-primary) 26%, var(--color-base-300));
 }
 
 .danger-button {
-  border: 1px solid #f0c3c3;
-  background: #fff5f5;
-  color: #b42323;
+  background: color-mix(in srgb, var(--color-error) 8%, var(--color-base-100));
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, var(--color-base-300));
+  color: var(--color-error);
 }
 
 .danger-button:hover {
-  background: #ffe7e7;
+  background: color-mix(in srgb, var(--color-error) 14%, var(--color-base-100));
+}
+
+.view-tab,
+.platform-tab {
+  border-radius: var(--radius-field);
+  color: color-mix(in srgb, var(--color-base-content) 70%, transparent);
+  font-size: 0.92rem;
+  font-weight: 800;
+  min-height: 2.25rem;
+  min-width: 5.25rem;
+  padding: 0.45rem 0.85rem;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+  }
+
+.view-tab.active,
+.platform-tab.active {
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+
+.platform-tab {
+  min-width: 9.6rem;
+}
+
+.image-badge {
+  background: color-mix(in srgb, var(--color-neutral) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-neutral-content) 18%, transparent);
+  border-radius: var(--radius-field);
+  color: var(--color-neutral-content);
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.image-badge.alt {
+  background: color-mix(in srgb, var(--color-base-100) 88%, transparent);
+  border-color: color-mix(in srgb, var(--color-base-content) 12%, transparent);
+  color: var(--color-base-content);
+}
+
+.sale-panel {
+  background: var(--color-base-200);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-box);
+}
+
+.cover-frame {
+  background: var(--color-base-200);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-box);
 }
 
 .cover-result {
   align-items: center;
-  background: #ffffff;
-  border: 1px solid #d3dce8;
-  border-radius: 0.45rem;
-  color: #202020;
+  background: var(--color-base-100);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-field);
+  color: var(--color-base-content);
   display: grid;
   gap: 0.7rem;
-  grid-template-columns: 4.5rem 1fr;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
   min-height: 4.5rem;
   padding: 0.45rem;
   text-align: left;
 }
 
 .cover-result:hover {
-  border-color: #d1222a;
-  background: #fff7f7;
+  border-color: var(--color-primary);
+  background: var(--color-base-200);
 }
 
 .cover-result img {
   aspect-ratio: 1 / 1;
-  border-radius: 0.32rem;
+  border-radius: calc(var(--radius-field) * 0.75);
   height: 4.5rem;
   object-fit: cover;
   width: 4.5rem;
@@ -182,13 +361,13 @@ button:disabled {
 }
 
 .cover-result small {
-  color: #4e5968;
+  color: color-mix(in srgb, var(--color-base-content) 64%, transparent);
   font-size: 0.78rem;
 }
 
 .checkbox-field {
   align-items: center;
-  color: #202020;
+  color: var(--color-base-content);
   display: flex;
   gap: 0.55rem;
   font-size: 0.92rem;
@@ -196,9 +375,16 @@ button:disabled {
 }
 
 .checkbox-field input {
-  accent-color: #d1222a;
+  accent-color: var(--color-primary);
   height: 1.05rem;
   width: 1.05rem;
+}
+
+.empty-state {
+  background: var(--color-base-100);
+  border: 1px dashed var(--color-base-300);
+  border-radius: var(--radius-box);
+  color: color-mix(in srgb, var(--color-base-content) 64%, transparent);
 }
 
 .line-clamp-2 {
@@ -206,4 +392,14 @@ button:disabled {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+}
+
+@media (max-width: 430px) {
+  .primary-button,
+  .secondary-button,
+  .ghost-button,
+  .danger-button {
+    font-size: 0.86rem;
+    padding-inline: 0.72rem;
+  }
 }

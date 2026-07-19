@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  normalizeChineseGameTitle,
+  toSimplifiedChinese,
+  toTraditionalChinese,
+} from "@/lib/chinese";
 
 export const runtime = "edge";
 
@@ -59,6 +64,21 @@ type CoverResult = {
   source: "mainland" | "hong-kong" | "algolia" | "page";
 };
 
+type NintendoPricePayload = {
+  prices?: NintendoPriceEntry[];
+};
+
+type NintendoPriceEntry = {
+  title_id?: number | string;
+  regular_price?: NintendoPriceValue | null;
+  discount_price?: NintendoPriceValue | null;
+};
+
+type NintendoPriceValue = {
+  raw_value?: string;
+  currency?: string;
+};
+
 const algoliaAppId = "U3B6GR4UA3";
 const algoliaApiKey = "a29c6927638bfd8cee23993e51e721c9";
 const algoliaIndex = "store_game_en_us";
@@ -117,8 +137,8 @@ async function searchNintendo(query: string): Promise<CoverResult[]> {
   ]);
 
   const results = [
-    ...(mainlandLookup.status === "fulfilled" ? mainlandLookup.value : []),
     ...(hongKongLookup.status === "fulfilled" ? hongKongLookup.value : []),
+    ...(mainlandLookup.status === "fulfilled" ? mainlandLookup.value : []),
     ...(algoliaLookup.status === "fulfilled" ? algoliaLookup.value : []),
   ];
 
@@ -198,7 +218,7 @@ async function searchNintendoHongKong(query: string): Promise<CoverResult[]> {
     }),
   );
 
-  return dedupeCoverResults(searches.flat());
+  return hydrateHongKongPrices(dedupeCoverResults(searches.flat()));
 }
 
 async function searchNintendoAlgolia(query: string): Promise<CoverResult[]> {
@@ -395,6 +415,7 @@ function scoreMainlandHit(hit: MainlandHit, query: string) {
 async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | null> {
   const url = new URL(inputUrl);
   const host = url.hostname.toLowerCase();
+  const hongKongNsuid = extractHongKongNsuid(url);
 
   if (
     url.protocol !== "https:" ||
@@ -412,6 +433,12 @@ async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | n
     throw new Error("Only Nintendo product pages are supported");
   }
 
+  if (host === "store.nintendo.com.hk" && hongKongNsuid) {
+    return fetchNintendoPageCover(
+      `https://ec.nintendo.com/HK/zh/titles/${hongKongNsuid}`,
+    );
+  }
+
   const response = await fetch(url.toString(), {
     headers: { "user-agent": "Mozilla/5.0 Switch Purchase Ledger" },
   });
@@ -424,6 +451,9 @@ async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | n
   const coverUrl = extractMetaContent(html, "og:image");
   const rawTitle = extractMetaContent(html, "og:title");
   const canonicalUrl = extractCanonicalUrl(html) ?? url.toString();
+  const price = hongKongNsuid
+    ? (await fetchHongKongPrices([hongKongNsuid])).get(hongKongNsuid) ?? null
+    : null;
 
   if (!coverUrl) {
     return null;
@@ -433,17 +463,18 @@ async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | n
     rawTitle
       ?.replace(/\s+for Nintendo Switch.*$/i, "")
       .replace(/\s+- Nintendo Official Site$/i, "")
+      .replace(/｜.*$/u, "")
       .trim() || "Nintendo Switch Game";
 
   return {
     id: canonicalUrl,
-    title: applyMainlandTitleStyle(toSimplifiedText(title)),
+    title: normalizeChineseGameTitle(title),
     coverUrl: optimizeCoverUrl(coverUrl),
     nintendoUrl: canonicalUrl,
     platform: "Nintendo Switch",
     releaseDate: null,
-    price: null,
-    currency: null,
+    price: price?.price ?? null,
+    currency: price?.currency ?? null,
     source: "page",
   };
 }
@@ -457,16 +488,16 @@ function toHongKongCoverResult(hit: HongKongHit): CoverResult | null {
 
   const nintendoUrl = buildHongKongGameUrl(hit);
   const categories = hit.category?.length
-    ? ` · ${hit.category.map(toSimplifiedText).map(applyMainlandTitleStyle).join(" / ")}`
+    ? ` · ${hit.category.map(normalizeChineseGameTitle).join(" / ")}`
     : "";
 
   return {
     id: hit.nsuid ?? hit.softCode ?? hit.sys?.id ?? nintendoUrl,
-    title: applyMainlandTitleStyle(toSimplifiedText(hit.title)),
+    title: normalizeChineseGameTitle(hit.title),
     coverUrl,
     nintendoUrl,
-    platform: `${applyMainlandTitleStyle(
-      toSimplifiedText(hit.hardwareCategory ?? "Nintendo Switch"),
+    platform: `${normalizeChineseGameTitle(
+      hit.hardwareCategory ?? "Nintendo Switch",
     )}${categories}`,
     releaseDate:
       hit.releaseDatePackage ??
@@ -479,6 +510,75 @@ function toHongKongCoverResult(hit: HongKongHit): CoverResult | null {
   };
 }
 
+async function hydrateHongKongPrices(results: CoverResult[]) {
+  const ids = results
+    .map((result) => result.id)
+    .filter((id) => /^\d{14}$/.test(id));
+  const priceMap = await fetchHongKongPrices(ids);
+
+  return results.map((result) => {
+    const price = priceMap.get(result.id);
+
+    return price ? { ...result, price: price.price, currency: price.currency } : result;
+  });
+}
+
+async function fetchHongKongPrices(ids: string[]) {
+  const uniqueIds = [...new Set(ids)].filter((id) => /^\d{14}$/.test(id));
+  const prices = new Map<string, { price: number; currency: string }>();
+
+  if (!uniqueIds.length) {
+    return prices;
+  }
+
+  try {
+    const url = new URL("https://api.ec.nintendo.com/v1/price");
+    url.searchParams.set("country", "HK");
+    url.searchParams.set("ids", uniqueIds.join(","));
+    url.searchParams.set("lang", "zh");
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        accept: "application/json",
+        "accept-language": "zh-HK,zh-TW;q=0.9,zh-CN;q=0.8,en;q=0.6",
+        "user-agent": "Mozilla/5.0 Switch Purchase Ledger",
+      },
+    });
+
+    if (!response.ok) {
+      return prices;
+    }
+
+    const payload = (await response.json()) as NintendoPricePayload;
+
+    for (const entry of payload.prices ?? []) {
+      const id = String(entry.title_id ?? "");
+      const value = entry.discount_price ?? entry.regular_price ?? null;
+      const price = parseNintendoPriceValue(value);
+
+      if (id && price) {
+        prices.set(id, price);
+      }
+    }
+  } catch {
+    return prices;
+  }
+
+  return prices;
+}
+
+function parseNintendoPriceValue(value: NintendoPriceValue | null) {
+  const rawValue = value?.raw_value;
+  const currency = value?.currency;
+
+  if (!rawValue || !currency) {
+    return null;
+  }
+
+  const price = Number(rawValue.replaceAll(",", ""));
+  return Number.isFinite(price) ? { price, currency } : null;
+}
+
 function toMainlandCoverResult(hit: MainlandHit): CoverResult | null {
   if (!hit.title || !hit.imgUrl) {
     return null;
@@ -488,13 +588,13 @@ function toMainlandCoverResult(hit: MainlandHit): CoverResult | null {
 
   return {
     id: nintendoUrl || normalizeSearchText(hit.title),
-    title: applyMainlandTitleStyle(toSimplifiedText(hit.title)),
+    title: normalizeChineseGameTitle(hit.title),
     coverUrl: optimizeCoverUrl(decodeScriptEscapes(hit.imgUrl)),
     nintendoUrl,
     platform: hit.version ? `Nintendo Switch · ${hit.version}` : "Nintendo Switch",
     releaseDate: hit.publishTime ?? null,
     price: hit.price ?? null,
-    currency: hit.price ? "CNY" : null,
+    currency: typeof hit.price === "number" ? "CNY" : null,
     source: "mainland",
   };
 }
@@ -518,6 +618,11 @@ function buildHongKongGameUrl(hit: HongKongHit) {
   }
 
   return new URL(url, nintendoBaseUrl).toString();
+}
+
+function extractHongKongNsuid(url: URL) {
+  const match = url.pathname.match(/(?:\/titles\/|\/)(\d{14})(?:\/)?$/);
+  return match?.[1] ?? "";
 }
 
 function buildMainlandGameUrl(rawUrl: string | undefined) {
@@ -559,7 +664,7 @@ function toCoverResult(hit: NintendoHit): CoverResult | null {
 
   return {
     id: hit.sku ?? hit.nsuid ?? hit.objectID ?? nintendoUrl,
-    title: hit.title,
+    title: normalizeChineseGameTitle(hit.title),
     coverUrl,
     nintendoUrl,
     platform: hit.platform ?? "Nintendo Switch",
@@ -938,8 +1043,9 @@ function buildMainlandQueryVariants(query: string) {
 
 function buildHongKongQueryVariants(query: string) {
   const trimmed = query.trim();
-  const variants = new Set<string>([trimmed]);
-  const traditional = toTraditionalSearchText(trimmed);
+  const simplified = toSimplifiedText(trimmed);
+  const traditional = toTraditionalSearchText(simplified);
+  const variants = new Set<string>([trimmed, simplified, traditional]);
 
   if (traditional !== trimmed) {
     variants.add(traditional);
@@ -992,6 +1098,7 @@ function applyMainlandTitleStyle(value: string) {
 }
 
 function toTraditionalSearchText(value: string) {
+  const converted = toTraditionalChinese(toSimplifiedChinese(value));
   const map: Record<string, string> = {
     马: "馬",
     玛: "瑪",
@@ -1042,10 +1149,11 @@ function toTraditionalSearchText(value: string) {
     球: "球",
   };
 
-  return [...value].map((char) => map[char] ?? char).join("");
+  return [...converted].map((char) => map[char] ?? char).join("");
 }
 
 function toSimplifiedText(value: string) {
+  const converted = toSimplifiedChinese(value);
   const map: Record<string, string> = {
     萬: "万",
     與: "与",
@@ -1588,11 +1696,11 @@ function toSimplifiedText(value: string) {
     邏: "逻",
   };
 
-  return [...value].map((char) => map[char] ?? char).join("");
+  return [...converted].map((char) => map[char] ?? char).join("");
 }
 
 function normalizeSearchText(value: string) {
-  return value
+  return toSimplifiedText(value)
     .normalize("NFKC")
     .replace(/[™®©]/g, "")
     .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
