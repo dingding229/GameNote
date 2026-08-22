@@ -43,6 +43,7 @@ type StatsPlatformScope = "all" | "nintendo-switch" | "playstation";
 type NintendoCoverResult = {
   id: string;
   title: string;
+  displayTitle?: string;
   coverUrl: string;
   officialUrl?: string;
   nintendoUrl?: string;
@@ -740,7 +741,7 @@ export default function LedgerClient({
     const normalized: FormState = {
       ...form,
       title: form.title.trim(),
-      seller: form.seller.trim(),
+      seller: isPhysicalFormat(form.format) ? form.seller.trim() : "",
       coverUrl: form.coverUrl.trim(),
       officialUrl: form.officialUrl.trim(),
       notes: form.notes.trim(),
@@ -801,6 +802,7 @@ export default function LedgerClient({
     setForm((current) => ({
       ...current,
       format,
+      seller: isPhysicalFormat(format) ? current.seller : "",
       soldDate: isPhysicalFormat(format) ? current.soldDate : "",
       soldPrice: isPhysicalFormat(format) ? current.soldPrice : 0,
       soldCurrency: isPhysicalFormat(format)
@@ -996,7 +998,7 @@ export default function LedgerClient({
         ...current,
         platform: resultPlatform,
         format,
-        title: result.title,
+        title: result.displayTitle || result.title,
         coverUrl: result.coverUrl,
         officialUrl: result.officialUrl || result.nintendoUrl || "",
         price: shouldApplyPrice ? result.price ?? current.price : current.price,
@@ -1235,9 +1237,12 @@ export default function LedgerClient({
                       className="cover-result"
                       onClick={() => applyOfficialGame(result)}
                     >
-                      <img src={result.coverUrl} alt={`${result.title}封面`} />
+                      <img
+                        src={result.coverUrl}
+                        alt={`${result.displayTitle || result.title}封面`}
+                      />
                       <span>
-                        <strong>{result.title}</strong>
+                        <strong>{result.displayTitle || result.title}</strong>
                         <small>
                           {coverSourceLabel(result.source)} ·{" "}
                           {result.platform}
@@ -1424,14 +1429,16 @@ export default function LedgerClient({
                 </div>
               ) : null}
 
-              <label className="field">
-                <span>购买渠道</span>
-                <input
-                  value={form.seller}
-                  onChange={(event) => updateForm("seller", event.target.value)}
-                  placeholder="淘宝 / 闲鱼 / 线下店"
-                />
-              </label>
+              {isPhysicalFormat(form.format) ? (
+                <label className="field">
+                  <span>购买渠道</span>
+                  <input
+                    value={form.seller}
+                    onChange={(event) => updateForm("seller", event.target.value)}
+                    placeholder="淘宝 / 闲鱼 / 线下店"
+                  />
+                </label>
+              ) : null}
 
               <label className="field">
                 <span>封面 URL</span>
@@ -1541,12 +1548,12 @@ export default function LedgerClient({
                   key={record.id}
                   className="record-card flex h-full flex-col overflow-hidden"
                 >
-                  <div className="relative aspect-[16/9] bg-primary">
+                  <div className="record-cover relative bg-primary">
                     {record.coverUrl ? (
                       <img
                         src={record.coverUrl}
                         alt={`${record.title}封面`}
-                        className="h-full w-full object-cover"
+                        className="record-cover-image"
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center px-8 text-center text-4xl font-black text-primary-content">
@@ -1742,7 +1749,10 @@ function normalizeImportedRecord(value: unknown): GameRecord | null {
         : new Date().toISOString().slice(0, 10),
     region,
     format,
-    seller: typeof record.seller === "string" ? record.seller : "",
+    seller:
+      isPhysicalFormat(format) && typeof record.seller === "string"
+        ? record.seller
+        : "",
     coverUrl: typeof record.coverUrl === "string" ? record.coverUrl : "",
     officialUrl,
     notes: typeof record.notes === "string" ? record.notes : "",

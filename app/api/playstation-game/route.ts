@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   normalizeChineseGameTitle,
-  normalizeChineseSearchText,
+  normalizeStoredGameTitle,
+  stripPlayStationStoreTitleMetadata,
   toSimplifiedChinese,
   toTraditionalChinese,
 } from "@/lib/chinese";
+import {
+  findChineseGameTitle,
+  resolveGameTitles,
+  type ResolvedGameTitle,
+} from "@/lib/game-title";
 
 export const runtime = "edge";
 
@@ -33,11 +39,22 @@ type PlayStationProduct = {
   personalizedMeta?: {
     media?: PlayStationMedia[];
   };
+  products?: Array<{ id?: string }>;
+};
+
+type PlayStationSearchResponse = {
+  data?: {
+    universalSearch?: {
+      results?: unknown[];
+    };
+  };
+  errors?: Array<{ message?: string }>;
 };
 
 type PlayStationLookupResult = {
   id: string;
   title: string;
+  displayTitle?: string;
   coverUrl: string;
   officialUrl: string;
   platform: string;
@@ -48,7 +65,12 @@ type PlayStationLookupResult = {
 };
 
 const playStationStoreBaseUrl = "https://store.playstation.com";
+const playStationGraphQlUrl =
+  "https://web.np.playstation.com/api/graphql/v1/op";
 const playStationHongKongLocale = "zh-hant-hk";
+const playStationSearchOperation = "getSearchResults";
+const playStationSearchHash =
+  "4df6284f982e57bec70f23c77e2c219dc792eb19af7fb3d3a81767aa3f1958aa";
 const excludedClassifications = new Set([
   "ADD_ON",
   "ITEM",
@@ -69,7 +91,14 @@ export async function GET(request: NextRequest) {
   try {
     if (pageUrl) {
       const result = await fetchPlayStationPage(pageUrl);
-      return NextResponse.json({ results: result ? [result] : [] });
+      if (!result) {
+        return NextResponse.json({ results: [] });
+      }
+
+      const resolvedTitles = await resolveGameTitles(result.title);
+      return NextResponse.json({
+        results: [withChineseDisplayTitle(result, resolvedTitles)],
+      });
     }
 
     if (!query) {
@@ -88,8 +117,10 @@ export async function GET(request: NextRequest) {
 async function searchPlayStationHongKong(
   query: string,
 ): Promise<PlayStationLookupResult[]> {
+  const resolvedTitles = await resolveGameTitles(query);
+  const variants = await buildPlayStationSearchVariants(query, resolvedTitles);
   const searches = await Promise.allSettled(
-    buildPlayStationSearchVariants(query).map(searchPlayStationHongKongVariant),
+    variants.map(searchPlayStationHongKongVariant),
   );
   const results = searches.flatMap((search) =>
     search.status === "fulfilled" ? search.value : [],
@@ -102,10 +133,87 @@ async function searchPlayStationHongKong(
     }
   }
 
-  return dedupeResults(results).slice(0, 12);
+  return dedupeResults(results)
+    .slice(0, 12)
+    .map((result) => withChineseDisplayTitle(result, resolvedTitles));
 }
 
 async function searchPlayStationHongKongVariant(
+  query: string,
+): Promise<PlayStationLookupResult[]> {
+  try {
+    const products = await searchPlayStationGraphQl(query);
+    if (products.length) {
+      return products
+        .filter(isGameLikeProduct)
+        .map((product) => toLookupResult(product, "playstation-hong-kong"))
+        .filter((result): result is PlayStationLookupResult => Boolean(result));
+    }
+  } catch (graphQlError) {
+    const legacyResults = await searchPlayStationPage(query);
+    if (legacyResults.length) {
+      return legacyResults;
+    }
+
+    throw graphQlError;
+  }
+
+  return searchPlayStationPage(query);
+}
+
+async function searchPlayStationGraphQl(
+  query: string,
+): Promise<PlayStationProduct[]> {
+  const url = new URL(playStationGraphQlUrl);
+  url.searchParams.set("operationName", playStationSearchOperation);
+  url.searchParams.set(
+    "variables",
+    JSON.stringify({
+      countryCode: "HK",
+      languageCode: "ch",
+      nextCursor: "",
+      pageOffset: 0,
+      pageSize: 24,
+      searchTerm: query,
+    }),
+  );
+  url.searchParams.set(
+    "extensions",
+    JSON.stringify({
+      persistedQuery: {
+        version: 1,
+        sha256Hash: playStationSearchHash,
+      },
+    }),
+  );
+
+  const response = await fetch(url, {
+    headers: {
+      ...playStationHeaders(`${playStationStoreBaseUrl}/${playStationHongKongLocale}/`),
+      accept: "application/json",
+      "x-apollo-operation-name": playStationSearchOperation,
+      "x-psn-app-ver": "@sie-ppr-web-store/app/0.113.0-",
+      "x-psn-store-locale-override": "zh-Hant-HK",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`PlayStation search API returned ${response.status}`);
+  }
+
+  const payload = (await response.json()) as PlayStationSearchResponse;
+  const apiError = payload.errors?.find((error) => error.message)?.message;
+  if (apiError) {
+    throw new Error(apiError);
+  }
+
+  const results = payload.data?.universalSearch?.results ?? [];
+  return results
+    .map(asSearchProduct)
+    .filter((product): product is PlayStationProduct => Boolean(product));
+}
+
+async function searchPlayStationPage(
   query: string,
 ): Promise<PlayStationLookupResult[]> {
   const url = `${playStationStoreBaseUrl}/${playStationHongKongLocale}/search/${encodeURIComponent(
@@ -164,38 +272,24 @@ function playStationHeaders(referer: string) {
   };
 }
 
-function buildPlayStationSearchVariants(query: string) {
+async function buildPlayStationSearchVariants(
+  query: string,
+  resolvedTitles: ResolvedGameTitle[],
+) {
   const trimmed = query.trim();
   const simplified = toSimplifiedChinese(trimmed);
   const traditional = toTraditionalChinese(simplified);
-  const normalized = normalizeChineseSearchText(trimmed);
-  const variants = new Set<string>([trimmed, simplified, traditional]);
-  const aliasEntries: Array<[RegExp, string[]]> = [
-    [/艾尔登法环|艾爾登法環|elden ring/i, ["ELDEN RING", "艾爾登法環"]],
-    [/最终幻想|最終幻想|太空戰士|final fantasy/i, ["FINAL FANTASY", "太空戰士"]],
-    [/战神|戰神|god of war/i, ["God of War", "戰神"]],
-    [/最后生还者|最後生還者|the last of us/i, ["The Last of Us", "最後生還者"]],
-    [/蜘蛛侠|蜘蛛俠|spider[-\s]?man/i, ["Marvel's Spider-Man", "蜘蛛俠"]],
-    [/地平线|地平線|horizon/i, ["Horizon", "地平線"]],
-    [/对马岛|對馬島|對馬戰鬼|ghost of tsushima/i, ["Ghost of Tsushima", "對馬戰鬼"]],
-    [/怪物猎人|怪物獵人|魔物獵人|monster hunter/i, ["Monster Hunter", "魔物獵人"]],
-    [/生化危机|生化危機|惡靈古堡|resident evil/i, ["Resident Evil", "惡靈古堡"]],
-    [/如龙|如龍|人中之龍|like a dragon|yakuza/i, ["Like a Dragon", "人中之龍"]],
-    [/女神异闻录|女神異聞錄|persona/i, ["Persona", "女神異聞錄"]],
-  ];
+  const variants = new Set<string>();
 
-  for (const [pattern, replacements] of aliasEntries) {
-    if (!pattern.test(normalized) && !pattern.test(trimmed)) {
-      continue;
-    }
-
-    for (const replacement of replacements) {
-      const replacementSimplified = toSimplifiedChinese(replacement);
-      variants.add(replacement);
-      variants.add(replacementSimplified);
-      variants.add(toTraditionalChinese(replacementSimplified));
+  for (const title of resolvedTitles) {
+    if (title.englishTitle) {
+      variants.add(title.englishTitle);
     }
   }
+
+  variants.add(trimmed);
+  variants.add(simplified);
+  variants.add(traditional);
 
   return [...variants].map((variant) => variant.trim()).filter(Boolean).slice(0, 8);
 }
@@ -353,7 +447,9 @@ function toLookupResult(
 
   return {
     id: product.id,
-    title: normalizeChineseGameTitle(product.name),
+    title: normalizeChineseGameTitle(
+      stripPlayStationStoreTitleMetadata(product.name),
+    ),
     coverUrl,
     officialUrl: `${playStationStoreBaseUrl}/${playStationHongKongLocale}/product/${product.id}`,
     platform: normalizeChineseGameTitle(
@@ -366,6 +462,22 @@ function toLookupResult(
     currency: price === null ? null : "HKD",
     source,
   };
+}
+
+function withChineseDisplayTitle(
+  result: PlayStationLookupResult,
+  resolvedTitles: ResolvedGameTitle[],
+): PlayStationLookupResult {
+  const normalizedTitle = normalizeStoredGameTitle(
+    stripPlayStationStoreTitleMetadata(result.title),
+  );
+  const chineseTitle = /[\u3400-\u9fff]/u.test(normalizedTitle)
+    ? normalizedTitle
+    : findChineseGameTitle(normalizedTitle, resolvedTitles);
+
+  return chineseTitle
+    ? { ...result, displayTitle: normalizeChineseGameTitle(chineseTitle) }
+    : result;
 }
 
 function isGameLikeProduct(product: PlayStationProduct) {
@@ -523,6 +635,22 @@ function asProduct(value: unknown): PlayStationProduct | null {
   }
 
   return record as PlayStationProduct;
+}
+
+function asSearchProduct(value: unknown): PlayStationProduct | null {
+  const record = asRecord(value);
+
+  if (!record || !["Product", "Concept"].includes(String(record.__typename))) {
+    return null;
+  }
+
+  if (record.__typename === "Product") {
+    return record as PlayStationProduct;
+  }
+
+  const concept = record as PlayStationProduct;
+  const productId = concept.products?.find((product) => product.id)?.id;
+  return productId ? { ...concept, id: productId } : null;
 }
 
 function decodeHtmlEntities(value: string) {

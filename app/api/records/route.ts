@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { hasValidAccessCookie } from "@/lib/access";
 import { readLedgerFromSqlite, writeLedgerToSqlite } from "@/lib/ledger-sqlite";
 import { createLedgerDocument, normalizeRecords } from "@/lib/ledger";
+import { normalizeChineseGameTitle } from "@/lib/chinese";
+import { resolveChineseGameTitle } from "@/lib/game-title";
+import type { GameRecord, LedgerDocument } from "@/lib/ledger";
 
 type SavePayload = {
   records?: unknown;
@@ -15,7 +18,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    return NextResponse.json(await readLedgerFromSqlite(), {
+    const document = await localizeLedgerDocument(await readLedgerFromSqlite());
+    return NextResponse.json(document, {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {
@@ -37,7 +41,7 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  const records = normalizeRecords(payload.records);
+  const records = await localizeRecords(normalizeRecords(payload.records));
 
   try {
     const document = createLedgerDocument(records);
@@ -50,6 +54,37 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     return storageFailure("保存数据库记录失败", error);
   }
+}
+
+async function localizeLedgerDocument(
+  document: LedgerDocument,
+): Promise<LedgerDocument> {
+  return { ...document, records: await localizeRecords(document.records) };
+}
+
+async function localizeRecords(records: GameRecord[]) {
+  const localizedTitles = new Map<string, string>();
+  const localizedRecords: GameRecord[] = [];
+
+  for (const record of records) {
+    if (/[\u3400-\u9fff]/u.test(record.title)) {
+      localizedRecords.push(record);
+      continue;
+    }
+
+    let localizedTitle = localizedTitles.get(record.title);
+    if (localizedTitle === undefined) {
+      const resolvedTitle = await resolveChineseGameTitle(record.title);
+      localizedTitle = resolvedTitle
+        ? normalizeChineseGameTitle(resolvedTitle)
+        : record.title;
+      localizedTitles.set(record.title, localizedTitle);
+    }
+
+    localizedRecords.push({ ...record, title: localizedTitle });
+  }
+
+  return localizedRecords;
 }
 
 function unauthorized() {

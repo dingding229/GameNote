@@ -4,6 +4,11 @@ import {
   toSimplifiedChinese,
   toTraditionalChinese,
 } from "@/lib/chinese";
+import {
+  findChineseGameTitle,
+  resolveGameTitles,
+  type ResolvedGameTitle,
+} from "@/lib/game-title";
 
 export const runtime = "edge";
 
@@ -55,6 +60,7 @@ type MainlandHit = {
 type CoverResult = {
   id: string;
   title: string;
+  displayTitle?: string;
   coverUrl: string;
   nintendoUrl: string;
   platform: string;
@@ -113,7 +119,14 @@ export async function GET(request: NextRequest) {
   try {
     if (pageUrl) {
       const result = await fetchNintendoPageCover(pageUrl);
-      return NextResponse.json({ results: result ? [result] : [] });
+      if (!result) {
+        return NextResponse.json({ results: [] });
+      }
+
+      const resolvedTitles = await resolveGameTitles(result.title);
+      return NextResponse.json({
+        results: [withChineseDisplayTitle(result, resolvedTitles)],
+      });
     }
 
     if (!query) {
@@ -130,10 +143,14 @@ export async function GET(request: NextRequest) {
 }
 
 async function searchNintendo(query: string): Promise<CoverResult[]> {
+  const resolvedTitles = await resolveGameTitles(query);
+  const englishTitles = resolvedTitles
+    .map((title) => title.englishTitle)
+    .filter(Boolean);
   const [mainlandLookup, hongKongLookup, algoliaLookup] = await Promise.allSettled([
-    searchNintendoMainland(query),
-    searchNintendoHongKong(query),
-    searchNintendoAlgolia(query),
+    searchNintendoMainland(query, englishTitles),
+    searchNintendoHongKong(query, englishTitles),
+    searchNintendoAlgolia(query, englishTitles),
   ]);
 
   const results = [
@@ -151,10 +168,42 @@ async function searchNintendo(query: string): Promise<CoverResult[]> {
     }
   }
 
-  return dedupeCoverResults(results).slice(0, 12);
+  const relevanceQueries = [...englishTitles, query];
+  return dedupeCoverResults(results)
+    .sort(
+      (left, right) =>
+        Math.max(
+          ...relevanceQueries.map((variant) =>
+            scoreHit({ title: right.title }, variant),
+          ),
+        ) -
+        Math.max(
+          ...relevanceQueries.map((variant) =>
+            scoreHit({ title: left.title }, variant),
+          ),
+        ),
+    )
+    .slice(0, 12)
+    .map((result) => withChineseDisplayTitle(result, resolvedTitles));
 }
 
-async function searchNintendoMainland(query: string): Promise<CoverResult[]> {
+function withChineseDisplayTitle(
+  result: CoverResult,
+  resolvedTitles: ResolvedGameTitle[],
+): CoverResult {
+  const chineseTitle = /[\u3400-\u9fff]/u.test(result.title)
+    ? result.title
+    : findChineseGameTitle(result.title, resolvedTitles);
+
+  return chineseTitle
+    ? { ...result, displayTitle: normalizeChineseGameTitle(chineseTitle) }
+    : result;
+}
+
+async function searchNintendoMainland(
+  query: string,
+  englishTitles: string[],
+): Promise<CoverResult[]> {
   const response = await fetch(nintendoMainlandSoftwareUrl, {
     headers: {
       "accept-language": "zh-CN,zh;q=0.9,en;q=0.6",
@@ -166,7 +215,7 @@ async function searchNintendoMainland(query: string): Promise<CoverResult[]> {
     throw new Error(`Nintendo Mainland search returned ${response.status}`);
   }
 
-  const variants = buildMainlandQueryVariants(query);
+  const variants = buildMainlandQueryVariants(query, englishTitles);
   const hits = extractMainlandHits(await response.text());
 
   return hits
@@ -182,8 +231,11 @@ async function searchNintendoMainland(query: string): Promise<CoverResult[]> {
     .filter((result): result is CoverResult => Boolean(result));
 }
 
-async function searchNintendoHongKong(query: string): Promise<CoverResult[]> {
-  const variants = buildHongKongQueryVariants(query);
+async function searchNintendoHongKong(
+  query: string,
+  englishTitles: string[],
+): Promise<CoverResult[]> {
+  const variants = buildHongKongQueryVariants(query, englishTitles);
   const searches = await Promise.all(
     variants.map(async (variant) => {
       const url = new URL(nintendoHongKongSoftwareUrl);
@@ -221,7 +273,11 @@ async function searchNintendoHongKong(query: string): Promise<CoverResult[]> {
   return hydrateHongKongPrices(dedupeCoverResults(searches.flat()));
 }
 
-async function searchNintendoAlgolia(query: string): Promise<CoverResult[]> {
+async function searchNintendoAlgolia(
+  query: string,
+  englishTitles: string[],
+): Promise<CoverResult[]> {
+  const variants = [...new Set([...englishTitles, query])].slice(0, 4);
   const params = new URLSearchParams({
     hitsPerPage: "12",
     analytics: "false",
@@ -239,13 +295,11 @@ async function searchNintendoAlgolia(query: string): Promise<CoverResult[]> {
         "x-algolia-application-id": algoliaAppId,
       },
       body: JSON.stringify({
-        requests: [
-          {
-            indexName: algoliaIndex,
-            query,
-            params: params.toString(),
-          },
-        ],
+        requests: variants.map((variant) => ({
+          indexName: algoliaIndex,
+          query: variant,
+          params: params.toString(),
+        })),
       }),
     },
   );
@@ -258,10 +312,13 @@ async function searchNintendoAlgolia(query: string): Promise<CoverResult[]> {
     results?: Array<{ hits?: NintendoHit[] }>;
   };
 
-  const hits = payload.results?.[0]?.hits ?? [];
+  const hits = payload.results?.flatMap((result) => result.hits ?? []) ?? [];
 
   return hits
-    .map((hit) => ({ hit, score: scoreHit(hit, query) }))
+    .map((hit) => ({
+      hit,
+      score: Math.max(...variants.map((variant) => scoreHit(hit, variant))),
+    }))
     .filter(({ score }) => score >= 30)
     .sort((left, right) => right.score - left.score)
     .map(({ hit }) => toCoverResult(hit))
@@ -1009,11 +1066,17 @@ function dedupeCoverResults(results: CoverResult[]) {
   });
 }
 
-function buildMainlandQueryVariants(query: string) {
+function buildMainlandQueryVariants(
+  query: string,
+  englishTitles: string[] = [],
+) {
   const trimmed = query.trim();
   const simplified = toSimplifiedText(trimmed);
   const mainland = applyMainlandTitleStyle(simplified);
-  const variants = new Set<string>([trimmed, simplified, mainland]);
+  const variants = new Set<string>(englishTitles);
+  variants.add(trimmed);
+  variants.add(simplified);
+  variants.add(mainland);
   const normalized = trimmed.toLowerCase();
   const aliasEntries: Array<[RegExp, string]> = [
     [/马里奥|玛利欧|瑪利歐|mario/i, "马力欧"],
@@ -1041,11 +1104,17 @@ function buildMainlandQueryVariants(query: string) {
   return [...variants].filter(Boolean).slice(0, 8);
 }
 
-function buildHongKongQueryVariants(query: string) {
+function buildHongKongQueryVariants(
+  query: string,
+  englishTitles: string[] = [],
+) {
   const trimmed = query.trim();
   const simplified = toSimplifiedText(trimmed);
   const traditional = toTraditionalSearchText(simplified);
-  const variants = new Set<string>([trimmed, simplified, traditional]);
+  const variants = new Set<string>(englishTitles);
+  variants.add(trimmed);
+  variants.add(simplified);
+  variants.add(traditional);
 
   if (traditional !== trimmed) {
     variants.add(traditional);

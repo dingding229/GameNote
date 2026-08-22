@@ -1,3 +1,8 @@
+import {
+  normalizeStoredGameTitle,
+  stripPlayStationStoreTitleMetadata,
+} from "@/lib/chinese";
+
 export type Region = "日版" | "港版" | "台版" | "美版" | "欧版" | "其他";
 export type GamePlatform = "Nintendo Switch" | "PlayStation";
 export type GameFormat = "实体卡带" | "实体光盘" | "数字版";
@@ -131,7 +136,11 @@ export function normalizeRecord(value: unknown): GameRecord | null {
   return {
     id: typeof record.id === "string" ? record.id : createId(),
     platform,
-    title: record.title.trim(),
+    title: normalizeStoredGameTitle(
+      platform === "PlayStation"
+        ? stripPlayStationStoreTitleMetadata(record.title)
+        : record.title,
+    ),
     price: Number(record.price) || 0,
     currency,
     purchaseDate:
@@ -140,7 +149,10 @@ export function normalizeRecord(value: unknown): GameRecord | null {
         : new Date().toISOString().slice(0, 10),
     region,
     format,
-    seller: typeof record.seller === "string" ? record.seller : "",
+    seller:
+      isPhysicalFormat(format) && typeof record.seller === "string"
+        ? record.seller
+        : "",
     coverUrl: typeof record.coverUrl === "string" ? record.coverUrl : "",
     officialUrl,
     notes: typeof record.notes === "string" ? record.notes : "",

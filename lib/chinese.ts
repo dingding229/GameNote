@@ -15,6 +15,44 @@ export function normalizeChineseGameTitle(value: string) {
   return applyMainlandTitleStyle(toSimplifiedChinese(value));
 }
 
+export function stripGameTitleLanguageSuffix(value: string) {
+  return value
+    .replace(
+      /\s*[（(][^（）()]*(?:(?:简体|繁体|簡體|繁體)?中文|韩文|韓文|英文|泰文|日文|马来文|馬來文|(?:日|中|英|韩|韓|泰|繁|简|簡){2,}文版)[^（）()]*[）)]\s*$/u,
+      "",
+    )
+    .trim();
+}
+
+export function stripPlayStationStoreTitleMetadata(value: string) {
+  return stripGameTitleLanguageSuffix(value)
+    .replace(
+      /\s*[（(]\s*(?:(?:数位|数字|數位)?(?:豪华|豪華|普通|标准|標準)(?:下载|下載)?版|(?:数位|数字|數位)版)\s*[）)]\s*$/u,
+      "",
+    )
+    .replace(
+      /\s+(?:(?:数位|数字|數位)?(?:豪华|豪華|普通|标准|標準)(?:下载|下載)?版|(?:下载|下載)游戏(?:普通|标准|標準)版)\s*$/u,
+      "",
+    )
+    .replace(
+      /\s*[（(]\s*PS[45][™®]?(?:\s*[&/]\s*PS[45][™®]?)?\s*[）)]\s*$/iu,
+      "",
+    )
+    .replace(
+      /\s+PS[45][™®]?(?:\s*[&/]\s*PS[45][™®]?)?\s*$/iu,
+      "",
+    )
+    .replace(/^《(.+)》$/u, "$1")
+    .trim();
+}
+
+export function normalizeStoredGameTitle(value: string) {
+  const stripped = stripGameTitleLanguageSuffix(value);
+  return /[\u3400-\u9fff]/u.test(stripped)
+    ? normalizeChineseGameTitle(stripped)
+    : stripped;
+}
+
 export function normalizeChineseSearchText(value: string) {
   return normalizeChineseGameTitle(value)
     .normalize("NFKC")
