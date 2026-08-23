@@ -1,4 +1,4 @@
-import type { GamePlatform } from "./ledger";
+import type { GamePlatform } from "@/lib/ledger/schema";
 
 export type StatsPlatformScope = "all" | "nintendo-switch" | "playstation";
 
@@ -6,9 +6,7 @@ export function getStatsPlatformScope(): StatsPlatformScope {
   return normalizeStatsPlatformScope(process.env.APP_STATS_PLATFORMS);
 }
 
-export function normalizeStatsPlatformScope(
-  value: string | undefined,
-): StatsPlatformScope {
+export function normalizeStatsPlatformScope(value: string | undefined): StatsPlatformScope {
   const normalized = (value || "all")
     .trim()
     .toLowerCase()

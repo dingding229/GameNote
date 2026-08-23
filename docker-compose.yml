@@ -8,8 +8,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      APP_ACCESS_PASSWORD: "请修改为你的访问密码"
-      APP_SECRET: "请修改为一段更长的随机字符串"
+      PS_PLUS_CATALOG_REFRESH_HOURS: ${PS_PLUS_CATALOG_REFRESH_HOURS:-12}
+      JWT_SECRET: "请修改为一段足够长的随机字符串"
+      OPENAI_API_KEY: "请填写 OpenAI API Key"
+      OPENAI_VISION_MODEL: "gpt-4.1-mini"
       APP_DATABASE_FILE: "/data/records.sqlite"
       # all/both = NS + PS, ns = 仅统计 NS, ps = 仅统计 PlayStation
       APP_STATS_PLATFORMS: "all"

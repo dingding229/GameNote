@@ -1,7 +1,7 @@
 import {
   normalizeStoredGameTitle,
   stripPlayStationStoreTitleMetadata,
-} from "@/lib/chinese";
+} from "@/lib/game/title-normalization";
 
 export type Region = "日版" | "港版" | "台版" | "美版" | "欧版" | "其他";
 export type GamePlatform = "Nintendo Switch" | "PlayStation";
@@ -63,9 +63,7 @@ export function normalizeLedgerDocument(value: unknown): LedgerDocument {
 
   const source = value && typeof value === "object" ? value : null;
   const rawRecords =
-    source && "records" in source
-      ? (source as { records?: unknown }).records
-      : null;
+    source && "records" in source ? (source as { records?: unknown }).records : null;
   const updatedAt =
     source && "updatedAt" in source
       ? String((source as { updatedAt?: unknown }).updatedAt || "")
@@ -79,9 +77,7 @@ export function normalizeLedgerDocument(value: unknown): LedgerDocument {
 }
 
 export function normalizeRecords(values: unknown[]): GameRecord[] {
-  return values
-    .map(normalizeRecord)
-    .filter((record): record is GameRecord => Boolean(record));
+  return values.map(normalizeRecord).filter((record): record is GameRecord => Boolean(record));
 }
 
 export function normalizeRecord(value: unknown): GameRecord | null {
@@ -106,9 +102,7 @@ export function normalizeRecord(value: unknown): GameRecord | null {
   const currency = currencies.includes(record.currency as Currency)
     ? (record.currency as Currency)
     : "CNY";
-  const region = regions.includes(record.region as Region)
-    ? (record.region as Region)
-    : "其他";
+  const region = regions.includes(record.region as Region) ? (record.region as Region) : "其他";
   const rawFormat = gameFormats.includes(record.format as GameFormat)
     ? (record.format as GameFormat)
     : record.condition === "数字版"
@@ -116,9 +110,7 @@ export function normalizeRecord(value: unknown): GameRecord | null {
       : physicalFormatForPlatform(platform);
   const format = normalizeFormatForPlatform(rawFormat, platform);
   const soldDate =
-    isPhysicalFormat(format) &&
-    typeof record.soldDate === "string" &&
-    record.soldDate
+    isPhysicalFormat(format) && typeof record.soldDate === "string" && record.soldDate
       ? record.soldDate
       : "";
   const soldCurrency = currencies.includes(record.soldCurrency as Currency)
@@ -137,9 +129,7 @@ export function normalizeRecord(value: unknown): GameRecord | null {
     id: typeof record.id === "string" ? record.id : createId(),
     platform,
     title: normalizeStoredGameTitle(
-      platform === "PlayStation"
-        ? stripPlayStationStoreTitleMetadata(record.title)
-        : record.title,
+      platform === "PlayStation" ? stripPlayStationStoreTitleMetadata(record.title) : record.title,
     ),
     price: Number(record.price) || 0,
     currency,
@@ -149,10 +139,7 @@ export function normalizeRecord(value: unknown): GameRecord | null {
         : new Date().toISOString().slice(0, 10),
     region,
     format,
-    seller:
-      isPhysicalFormat(format) && typeof record.seller === "string"
-        ? record.seller
-        : "",
+    seller: isPhysicalFormat(format) && typeof record.seller === "string" ? record.seller : "",
     coverUrl: typeof record.coverUrl === "string" ? record.coverUrl : "",
     officialUrl,
     notes: typeof record.notes === "string" ? record.notes : "",
@@ -166,10 +153,7 @@ export function physicalFormatForPlatform(platform: GamePlatform): GameFormat {
   return platform === "PlayStation" ? "实体光盘" : "实体卡带";
 }
 
-export function normalizeFormatForPlatform(
-  format: GameFormat,
-  platform: GamePlatform,
-): GameFormat {
+export function normalizeFormatForPlatform(format: GameFormat, platform: GamePlatform): GameFormat {
   if (format === "数字版") {
     return format;
   }

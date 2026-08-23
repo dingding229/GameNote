@@ -1,0 +1,337 @@
+import type { ChangeEvent, Dispatch, FormEvent, RefObject, SetStateAction } from "react";
+import type { SettingsState } from "../types";
+
+type SettingsUpdater = Dispatch<SetStateAction<SettingsState>>;
+
+type SettingsPageProps = {
+  settings: SettingsState;
+  setSettings: SettingsUpdater;
+  settingsStatus: string;
+  setSettingsStatus: (message: string) => void;
+  aiModels: string[];
+  aiActionStatus: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onThemeColorChange: (color: string) => void;
+  onAiAction: (action: "models" | "test") => void;
+  onChangePassword: () => void;
+  onImportClick: () => void;
+  onImport: (event: ChangeEvent<HTMLInputElement>) => void;
+  onExport: () => void;
+  fileInputRef: RefObject<HTMLInputElement | null>;
+};
+
+export function SettingsPage({
+  settings,
+  setSettings,
+  settingsStatus,
+  setSettingsStatus,
+  aiModels,
+  aiActionStatus,
+  onSubmit,
+  onThemeColorChange,
+  onAiAction,
+  onChangePassword,
+  onImportClick,
+  onImport,
+  onExport,
+  fileInputRef,
+}: SettingsPageProps) {
+  function selectAvatar(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || file.size > 500_000) {
+      setSettingsStatus("头像需小于 500KB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () =>
+      setSettings((current) => ({ ...current, avatarUrl: String(reader.result || "") }));
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <form className="settings-page" onSubmit={onSubmit}>
+      <header>
+        <p className="ledger-kicker">Settings</p>
+        <h2>设置</h2>
+        <span>管理外观、AI 识别、数据备份和账户安全</span>
+      </header>
+      <section className="settings-section">
+        <div>
+          <h3>外观</h3>
+          <p>自定义网站标题、右上角头像和主题色。</p>
+        </div>
+        <div className="settings-fields">
+          <label className="field">
+            <span>网站标题</span>
+            <input
+              value={settings.siteTitle}
+              maxLength={40}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, siteTitle: event.target.value }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>主题色</span>
+            <input
+              type="color"
+              value={settings.themeColor}
+              onChange={(event) => {
+                setSettings((current) => ({ ...current, themeColor: event.target.value }));
+                onThemeColorChange(event.target.value);
+              }}
+            />
+          </label>
+          <label className="avatar-upload">
+            <span>头像图片（小于 500KB）</span>
+            <input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectAvatar} />
+            {settings.avatarUrl ? <img src={settings.avatarUrl} alt="头像预览" /> : null}
+          </label>
+        </div>
+      </section>
+      <section className="settings-section">
+        <div>
+          <h3>AI 识别</h3>
+          <p>配置兼容 OpenAI Responses API 的服务。</p>
+        </div>
+        <div className="settings-fields">
+          <label className="field">
+            <span>API 地址</span>
+            <input
+              value={settings.aiBaseUrl}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, aiBaseUrl: event.target.value }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>视觉模型</span>
+            <input
+              list="ai-model-options"
+              value={settings.aiModel}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, aiModel: event.target.value }))
+              }
+            />
+            <datalist id="ai-model-options">
+              {aiModels.map((model) => (
+                <option value={model} key={model} />
+              ))}
+            </datalist>
+          </label>
+          <label className="field settings-wide">
+            <span>API Key {settings.aiApiKeyConfigured ? "（已配置，留空保持）" : ""}</span>
+            <input
+              type="password"
+              value={settings.aiApiKey}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, aiApiKey: event.target.value }))
+              }
+            />
+          </label>
+          <div className="settings-actions settings-wide">
+            <button className="ghost-button" type="button" onClick={() => onAiAction("models")}>
+              获取模型
+            </button>
+            <button className="ghost-button" type="button" onClick={() => onAiAction("test")}>
+              测试接口
+            </button>
+            {aiActionStatus ? (
+              <span className="settings-message" role="status" aria-live="polite">
+                {aiActionStatus}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </section>
+      <section className="settings-section">
+        <div>
+          <h3>数据备份</h3>
+          <p>导出全部购买记录，或从 JSON 备份恢复记录。</p>
+        </div>
+        <div className="settings-fields">
+          <div className="settings-actions settings-wide">
+            <button className="ghost-button" type="button" onClick={onImportClick}>
+              导入 JSON
+            </button>
+            <button className="ghost-button" type="button" onClick={onExport}>
+              导出 JSON
+            </button>
+          </div>
+          <input
+            ref={fileInputRef}
+            accept=".json,application/json"
+            className="hidden"
+            type="file"
+            onChange={onImport}
+          />
+        </div>
+      </section>
+      <section className="settings-section">
+        <div>
+          <h3>账户安全</h3>
+          <p>修改管理员登录密码。</p>
+        </div>
+        <div className="settings-fields">
+          <label className="field">
+            <span>当前密码</span>
+            <input
+              type="password"
+              value={settings.currentPassword}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, currentPassword: event.target.value }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>新密码</span>
+            <input
+              type="password"
+              value={settings.newPassword}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, newPassword: event.target.value }))
+              }
+            />
+          </label>
+          <button
+            className="ghost-button"
+            type="button"
+            disabled={!settings.currentPassword || !settings.newPassword}
+            onClick={onChangePassword}
+          >
+            修改密码
+          </button>
+        </div>
+      </section>
+      <footer>
+        <span role="status" aria-live="polite">
+          {settingsStatus}
+        </span>
+        <button className="primary-button" type="submit">
+          保存设置
+        </button>
+      </footer>
+    </form>
+  );
+}
+
+type MembershipPageProps = {
+  settings: SettingsState;
+  setSettings: SettingsUpdater;
+  settingsStatus: string;
+  psPlusStatus: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSyncPsPlus: () => void;
+};
+
+export function MembershipPage({
+  settings,
+  setSettings,
+  settingsStatus,
+  psPlusStatus,
+  onSubmit,
+  onSyncPsPlus,
+}: MembershipPageProps) {
+  return (
+    <form className="settings-page membership-page" onSubmit={onSubmit}>
+      <header>
+        <p className="ledger-kicker">Memberships</p>
+        <h2>会员记录</h2>
+        <span>统一记录 Nintendo Switch Online 与 PlayStation Plus 会员状态</span>
+      </header>
+      <section className="settings-section membership-section">
+        <div>
+          <h3>Nintendo Switch Online</h3>
+          <p>仅记录会员状态和到期时间，不触发任何自动功能。</p>
+        </div>
+        <div className="settings-fields">
+          <label className="checkbox-field settings-wide">
+            <input
+              type="checkbox"
+              checked={settings.nsOnlineEnabled}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, nsOnlineEnabled: event.target.checked }))
+              }
+            />
+            <span>已开通 Nintendo Switch Online</span>
+          </label>
+          <label className="field">
+            <span>会员到期时间</span>
+            <input
+              type="date"
+              disabled={!settings.nsOnlineEnabled}
+              value={settings.nsOnlineExpiresAt}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, nsOnlineExpiresAt: event.target.value }))
+              }
+            />
+          </label>
+        </div>
+      </section>
+      <section className="settings-section membership-section">
+        <div>
+          <h3>PlayStation Plus</h3>
+          <p>记录会员有效期，并控制每月会免是否自动加入游戏记录。</p>
+        </div>
+        <div className="settings-fields">
+          <label className="checkbox-field settings-wide">
+            <input
+              type="checkbox"
+              checked={settings.psPlusEnabled}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, psPlusEnabled: event.target.checked }))
+              }
+            />
+            <span>已开通 PlayStation Plus</span>
+          </label>
+          <label className="field">
+            <span>会员到期时间</span>
+            <input
+              type="date"
+              disabled={!settings.psPlusEnabled}
+              value={settings.psPlusExpiresAt}
+              onChange={(event) =>
+                setSettings((current) => ({ ...current, psPlusExpiresAt: event.target.value }))
+              }
+            />
+          </label>
+          <label className="checkbox-field settings-wide">
+            <input
+              type="checkbox"
+              disabled={!settings.psPlusEnabled}
+              checked={settings.psPlusAutoAddMonthly}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  psPlusAutoAddMonthly: event.target.checked,
+                }))
+              }
+            />
+            <span>自动识别并加入每月会免游戏</span>
+          </label>
+          <button
+            className="ghost-button"
+            type="button"
+            disabled={!settings.psPlusEnabled || !settings.psPlusAutoAddMonthly}
+            onClick={onSyncPsPlus}
+          >
+            立即检查本月会免
+          </button>
+          {psPlusStatus ? (
+            <p className="settings-wide settings-message" role="status" aria-live="polite">
+              {psPlusStatus}
+            </p>
+          ) : null}
+        </div>
+      </section>
+      <footer>
+        <span role="status" aria-live="polite">
+          {settingsStatus}
+        </span>
+        <button className="primary-button" type="submit">
+          保存会员记录
+        </button>
+      </footer>
+    </form>
+  );
+}

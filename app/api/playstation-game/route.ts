@@ -5,12 +5,13 @@ import {
   stripPlayStationStoreTitleMetadata,
   toSimplifiedChinese,
   toTraditionalChinese,
-} from "@/lib/chinese";
+} from "@/lib/game/title-normalization";
 import {
   findChineseGameTitle,
+  resolveChineseGameTitle,
   resolveGameTitles,
   type ResolvedGameTitle,
-} from "@/lib/game-title";
+} from "@/lib/game/title-resolution";
 
 export const runtime = "edge";
 
@@ -65,12 +66,10 @@ type PlayStationLookupResult = {
 };
 
 const playStationStoreBaseUrl = "https://store.playstation.com";
-const playStationGraphQlUrl =
-  "https://web.np.playstation.com/api/graphql/v1/op";
+const playStationGraphQlUrl = "https://web.np.playstation.com/api/graphql/v1/op";
 const playStationHongKongLocale = "zh-hant-hk";
 const playStationSearchOperation = "getSearchResults";
-const playStationSearchHash =
-  "4df6284f982e57bec70f23c77e2c219dc792eb19af7fb3d3a81767aa3f1958aa";
+const playStationSearchHash = "4df6284f982e57bec70f23c77e2c219dc792eb19af7fb3d3a81767aa3f1958aa";
 const excludedClassifications = new Set([
   "ADD_ON",
   "ITEM",
@@ -108,23 +107,67 @@ export async function GET(request: NextRequest) {
     const results = await searchPlayStationHongKong(query);
     return NextResponse.json({ results });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "PlayStation lookup failed";
+    const message = error instanceof Error ? error.message : "PlayStation lookup failed";
     return NextResponse.json({ error: message, results: [] }, { status: 502 });
   }
 }
 
-async function searchPlayStationHongKong(
-  query: string,
-): Promise<PlayStationLookupResult[]> {
+export async function POST(request: NextRequest) {
+  const payload = (await request.json().catch(() => ({}))) as { titles?: unknown };
+  const titles = Array.isArray(payload.titles)
+    ? payload.titles
+        .filter((title): title is string => typeof title === "string" && Boolean(title.trim()))
+        .slice(0, 20)
+    : [];
+  if (!titles.length) return NextResponse.json({ games: [] });
+
+  const games = await Promise.all(
+    titles.map(async (requestedTitle) => {
+      try {
+        const results = await searchPlayStationHongKong(requestedTitle);
+        const match = selectClosestSearchResult(requestedTitle, results);
+        const translatedTitle = await resolveChineseGameTitle(requestedTitle);
+        return {
+          requestedTitle,
+          localizedTitle: match?.displayTitle || translatedTitle || requestedTitle,
+          coverUrl: match?.coverUrl || "",
+        };
+      } catch {
+        return { requestedTitle, localizedTitle: requestedTitle, coverUrl: "" };
+      }
+    }),
+  );
+  return NextResponse.json({ games });
+}
+
+function selectClosestSearchResult(query: string, results: PlayStationLookupResult[]) {
+  const normalizedQuery = comparableCatalogTitle(query);
+  return [...results].sort(
+    (left, right) =>
+      catalogResultScore(right, normalizedQuery) - catalogResultScore(left, normalizedQuery),
+  )[0];
+}
+
+function catalogResultScore(result: PlayStationLookupResult, normalizedQuery: string) {
+  const normalizedTitle = comparableCatalogTitle(result.title);
+  if (normalizedTitle === normalizedQuery) return 100;
+  if (normalizedTitle.startsWith(normalizedQuery) || normalizedQuery.startsWith(normalizedTitle))
+    return 70;
+  return 0;
+}
+
+function comparableCatalogTitle(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[™®©]/g, "")
+    .replace(/[^a-z0-9\u3400-\u9fff]+/g, "");
+}
+
+async function searchPlayStationHongKong(query: string): Promise<PlayStationLookupResult[]> {
   const resolvedTitles = await resolveGameTitles(query);
   const variants = await buildPlayStationSearchVariants(query, resolvedTitles);
-  const searches = await Promise.allSettled(
-    variants.map(searchPlayStationHongKongVariant),
-  );
-  const results = searches.flatMap((search) =>
-    search.status === "fulfilled" ? search.value : [],
-  );
+  const searches = await Promise.allSettled(variants.map(searchPlayStationHongKongVariant));
+  const results = searches.flatMap((search) => (search.status === "fulfilled" ? search.value : []));
 
   if (!results.length) {
     const rejectedSearch = searches.find((search) => search.status === "rejected");
@@ -138,9 +181,7 @@ async function searchPlayStationHongKong(
     .map((result) => withChineseDisplayTitle(result, resolvedTitles));
 }
 
-async function searchPlayStationHongKongVariant(
-  query: string,
-): Promise<PlayStationLookupResult[]> {
+async function searchPlayStationHongKongVariant(query: string): Promise<PlayStationLookupResult[]> {
   try {
     const products = await searchPlayStationGraphQl(query);
     if (products.length) {
@@ -161,9 +202,7 @@ async function searchPlayStationHongKongVariant(
   return searchPlayStationPage(query);
 }
 
-async function searchPlayStationGraphQl(
-  query: string,
-): Promise<PlayStationProduct[]> {
+async function searchPlayStationGraphQl(query: string): Promise<PlayStationProduct[]> {
   const url = new URL(playStationGraphQlUrl);
   url.searchParams.set("operationName", playStationSearchOperation);
   url.searchParams.set(
@@ -213,9 +252,7 @@ async function searchPlayStationGraphQl(
     .filter((product): product is PlayStationProduct => Boolean(product));
 }
 
-async function searchPlayStationPage(
-  query: string,
-): Promise<PlayStationLookupResult[]> {
+async function searchPlayStationPage(query: string): Promise<PlayStationLookupResult[]> {
   const url = `${playStationStoreBaseUrl}/${playStationHongKongLocale}/search/${encodeURIComponent(
     query,
   )}`;
@@ -237,9 +274,7 @@ async function searchPlayStationPage(
     .filter((result): result is PlayStationLookupResult => Boolean(result));
 }
 
-async function fetchPlayStationPage(
-  inputUrl: string,
-): Promise<PlayStationLookupResult | null> {
+async function fetchPlayStationPage(inputUrl: string): Promise<PlayStationLookupResult | null> {
   const productId = extractProductId(inputUrl);
   const url = `${playStationStoreBaseUrl}/${playStationHongKongLocale}/product/${productId}`;
   const response = await fetch(url, {
@@ -256,11 +291,7 @@ async function fetchPlayStationPage(
     extractProductFromApolloState(extractApolloState(html), productId);
 
   return product
-    ? toLookupResult(
-        product,
-        "playstation-page",
-        extractDisplayedHongKongPrice(html),
-      )
+    ? toLookupResult(product, "playstation-page", extractDisplayedHongKongPrice(html))
     : null;
 }
 
@@ -272,10 +303,7 @@ function playStationHeaders(referer: string) {
   };
 }
 
-async function buildPlayStationSearchVariants(
-  query: string,
-  resolvedTitles: ResolvedGameTitle[],
-) {
+async function buildPlayStationSearchVariants(query: string, resolvedTitles: ResolvedGameTitle[]) {
   const trimmed = query.trim();
   const simplified = toSimplifiedChinese(trimmed);
   const traditional = toTraditionalChinese(simplified);
@@ -291,7 +319,10 @@ async function buildPlayStationSearchVariants(
   variants.add(simplified);
   variants.add(traditional);
 
-  return [...variants].map((variant) => variant.trim()).filter(Boolean).slice(0, 8);
+  return [...variants]
+    .map((variant) => variant.trim())
+    .filter(Boolean)
+    .slice(0, 8);
 }
 
 function extractProductId(inputUrl: string) {
@@ -305,9 +336,7 @@ function extractProductId(inputUrl: string) {
 
   if (
     url.protocol !== "https:" ||
-    !["store.playstation.com", "www.playstation.com"].includes(
-      url.hostname.toLowerCase(),
-    )
+    !["store.playstation.com", "www.playstation.com"].includes(url.hostname.toLowerCase())
   ) {
     throw new Error("仅支持 PlayStation 香港官方商品页");
   }
@@ -380,15 +409,12 @@ function extractProductFromEnvCaches(html: string, productId: string) {
     candidates.push(...products);
   }
 
-  return candidates.sort(
-    (left, right) => productDataScore(right) - productDataScore(left),
-  )[0] ?? null;
+  return (
+    candidates.sort((left, right) => productDataScore(right) - productDataScore(left))[0] ?? null
+  );
 }
 
-function extractProductFromApolloState(
-  apolloState: Record<string, unknown>,
-  productId: string,
-) {
+function extractProductFromApolloState(apolloState: Record<string, unknown>, productId: string) {
   return (
     Object.values(apolloState)
       .map(asProduct)
@@ -439,23 +465,16 @@ function toLookupResult(
   }
 
   const price = parseHongKongPrice(product.price) ?? fallbackPrice;
-  const classification =
-    product.localizedStoreDisplayClassification || product.edition?.name || "";
-  const platforms = Array.isArray(product.platforms)
-    ? product.platforms.filter(Boolean)
-    : [];
+  const classification = product.localizedStoreDisplayClassification || product.edition?.name || "";
+  const platforms = Array.isArray(product.platforms) ? product.platforms.filter(Boolean) : [];
 
   return {
     id: product.id,
-    title: normalizeChineseGameTitle(
-      stripPlayStationStoreTitleMetadata(product.name),
-    ),
+    title: normalizeChineseGameTitle(stripPlayStationStoreTitleMetadata(product.name)),
     coverUrl,
     officialUrl: `${playStationStoreBaseUrl}/${playStationHongKongLocale}/product/${product.id}`,
     platform: normalizeChineseGameTitle(
-      [platforms.join(" / ") || "PlayStation", classification]
-        .filter(Boolean)
-        .join(" · "),
+      [platforms.join(" / ") || "PlayStation", classification].filter(Boolean).join(" · "),
     ),
     releaseDate: normalizeReleaseDate(product.releaseDate),
     price,
@@ -515,10 +534,9 @@ function productDataScore(product: PlayStationProduct) {
 }
 
 function selectCoverUrl(product: PlayStationProduct) {
-  const media = [
-    ...(product.personalizedMeta?.media ?? []),
-    ...(product.media ?? []),
-  ].filter((item) => item.type === "IMAGE" && item.url);
+  const media = [...(product.personalizedMeta?.media ?? []), ...(product.media ?? [])].filter(
+    (item) => item.type === "IMAGE" && item.url,
+  );
   const rolePriority = [
     "GAMEHUB_COVER_ART",
     "MASTER",
@@ -622,9 +640,7 @@ function parseJson(value: string) {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object"
-    ? (value as Record<string, unknown>)
-    : null;
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
 function asProduct(value: unknown): PlayStationProduct | null {

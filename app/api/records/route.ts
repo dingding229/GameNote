@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { hasValidAccessCookie } from "@/lib/access";
-import { readLedgerFromSqlite, writeLedgerToSqlite } from "@/lib/ledger-sqlite";
-import { createLedgerDocument, normalizeRecords } from "@/lib/ledger";
-import { normalizeChineseGameTitle } from "@/lib/chinese";
-import { resolveChineseGameTitle } from "@/lib/game-title";
-import type { GameRecord, LedgerDocument } from "@/lib/ledger";
+import { hasValidAccessCookie } from "@/lib/auth/access";
+import { readLedgerFromSqlite, writeLedgerToSqlite } from "@/lib/ledger/repository";
+import { createLedgerDocument, normalizeRecords } from "@/lib/ledger/schema";
+import { normalizeChineseGameTitle } from "@/lib/game/title-normalization";
+import { resolveChineseGameTitle } from "@/lib/game/title-resolution";
+import type { GameRecord, LedgerDocument } from "@/lib/ledger/schema";
 
 type SavePayload = {
   records?: unknown;
@@ -13,10 +13,6 @@ type SavePayload = {
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  if (!(await hasValidAccessCookie(request))) {
-    return unauthorized();
-  }
-
   try {
     const document = await localizeLedgerDocument(await readLedgerFromSqlite());
     return NextResponse.json(document, {
@@ -35,10 +31,7 @@ export async function PUT(request: NextRequest) {
   const payload = (await request.json().catch(() => ({}))) as SavePayload;
 
   if (!Array.isArray(payload.records)) {
-    return NextResponse.json(
-      { error: "records must be an array" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "records must be an array" }, { status: 400 });
   }
 
   const records = await localizeRecords(normalizeRecords(payload.records));
@@ -56,35 +49,45 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-async function localizeLedgerDocument(
-  document: LedgerDocument,
-): Promise<LedgerDocument> {
+async function localizeLedgerDocument(document: LedgerDocument): Promise<LedgerDocument> {
   return { ...document, records: await localizeRecords(document.records) };
 }
 
 async function localizeRecords(records: GameRecord[]) {
+  const titles = [
+    ...new Set(
+      records.map((record) => record.title).filter((title) => !/[\u3400-\u9fff]/u.test(title)),
+    ),
+  ];
   const localizedTitles = new Map<string, string>();
-  const localizedRecords: GameRecord[] = [];
 
-  for (const record of records) {
-    if (/[\u3400-\u9fff]/u.test(record.title)) {
-      localizedRecords.push(record);
-      continue;
+  await mapWithConcurrency(titles, 4, async (title) => {
+    const resolvedTitle = await resolveChineseGameTitle(title);
+    localizedTitles.set(title, resolvedTitle ? normalizeChineseGameTitle(resolvedTitle) : title);
+  });
+
+  return records.map((record) => {
+    const localizedTitle = localizedTitles.get(record.title);
+    return localizedTitle && localizedTitle !== record.title
+      ? { ...record, title: localizedTitle }
+      : record;
+  });
+}
+
+async function mapWithConcurrency<T>(
+  values: T[],
+  concurrency: number,
+  task: (value: T) => Promise<void>,
+) {
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (nextIndex < values.length) {
+      const value = values[nextIndex];
+      nextIndex += 1;
+      await task(value);
     }
-
-    let localizedTitle = localizedTitles.get(record.title);
-    if (localizedTitle === undefined) {
-      const resolvedTitle = await resolveChineseGameTitle(record.title);
-      localizedTitle = resolvedTitle
-        ? normalizeChineseGameTitle(resolvedTitle)
-        : record.title;
-      localizedTitles.set(record.title, localizedTitle);
-    }
-
-    localizedRecords.push({ ...record, title: localizedTitle });
-  }
-
-  return localizedRecords;
+  });
+  await Promise.all(workers);
 }
 
 function unauthorized() {

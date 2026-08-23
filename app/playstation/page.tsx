@@ -1,4 +1,4 @@
-import LedgerClient from "../ledger-client";
+import { LedgerClient } from "@/features/ledger";
 
 export default function PlayStationPage() {
   return <LedgerClient initialPlatform="PlayStation" />;

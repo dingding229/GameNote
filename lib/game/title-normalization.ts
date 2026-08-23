@@ -34,23 +34,15 @@ export function stripPlayStationStoreTitleMetadata(value: string) {
       /\s+(?:(?:数位|数字|數位)?(?:豪华|豪華|普通|标准|標準)(?:下载|下載)?版|(?:下载|下載)游戏(?:普通|标准|標準)版)\s*$/u,
       "",
     )
-    .replace(
-      /\s*[（(]\s*PS[45][™®]?(?:\s*[&/]\s*PS[45][™®]?)?\s*[）)]\s*$/iu,
-      "",
-    )
-    .replace(
-      /\s+PS[45][™®]?(?:\s*[&/]\s*PS[45][™®]?)?\s*$/iu,
-      "",
-    )
+    .replace(/\s*[（(]\s*PS[45][™®]?(?:\s*[&/]\s*PS[45][™®]?)?\s*[）)]\s*$/iu, "")
+    .replace(/\s+PS[45][™®]?(?:\s*[&/]\s*PS[45][™®]?)?\s*$/iu, "")
     .replace(/^《(.+)》$/u, "$1")
     .trim();
 }
 
 export function normalizeStoredGameTitle(value: string) {
   const stripped = stripGameTitleLanguageSuffix(value);
-  return /[\u3400-\u9fff]/u.test(stripped)
-    ? normalizeChineseGameTitle(stripped)
-    : stripped;
+  return /[\u3400-\u9fff]/u.test(stripped) ? normalizeChineseGameTitle(stripped) : stripped;
 }
 
 export function normalizeChineseSearchText(value: string) {

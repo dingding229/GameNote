@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getStatsPlatformScope } from "@/lib/app-config";
+import { getStatsPlatformScope } from "@/lib/config/app";
 
 export const dynamic = "force-dynamic";
 

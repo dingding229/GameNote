@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { hasValidAccessCookie } from "@/lib/access";
-import { readLedgerFromSqlite } from "@/lib/ledger-sqlite";
-import type { GameRecord } from "@/lib/ledger";
+import { hasValidAccessCookie } from "@/lib/auth/access";
+import { readLedgerFromSqlite } from "@/lib/ledger/repository";
+import type { GameRecord } from "@/lib/ledger/schema";
 
 export const runtime = "nodejs";
 

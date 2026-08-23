@@ -25,9 +25,7 @@ export async function GET() {
       throw new Error(`Frankfurter returned HTTP ${response.status}`);
     }
 
-    const payload = (await response.json()) as
-      | FrankfurterResponse
-      | FrankfurterResponse[];
+    const payload = (await response.json()) as FrankfurterResponse | FrankfurterResponse[];
     const rates: Record<string, number> = { CNY: 1 };
     const sourceRates = normalizeFrankfurterRates(payload);
 
@@ -64,9 +62,7 @@ export async function GET() {
   }
 }
 
-function normalizeFrankfurterRates(
-  payload: FrankfurterResponse | FrankfurterResponse[],
-) {
+function normalizeFrankfurterRates(payload: FrankfurterResponse | FrankfurterResponse[]) {
   if (!Array.isArray(payload)) {
     return payload.rates ?? {};
   }
@@ -75,8 +71,7 @@ function normalizeFrankfurterRates(
     payload
       .map((entry) => [entry.quote, entry.rate])
       .filter(
-        (entry): entry is [string, unknown] =>
-          typeof entry[0] === "string" && entry[0].length > 0,
+        (entry): entry is [string, unknown] => typeof entry[0] === "string" && entry[0].length > 0,
       ),
   );
 }

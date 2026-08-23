@@ -1,8 +1,4 @@
-import {
-  createEmptyLedger,
-  type LedgerDocument,
-  normalizeLedgerDocument,
-} from "./ledger";
+import { createEmptyLedger, type LedgerDocument, normalizeLedgerDocument } from "./schema";
 
 export type StatementSync = {
   get(...values: unknown[]): unknown;
@@ -38,9 +34,7 @@ export async function readLedgerFromSqlite(): Promise<LedgerDocument> {
     ensureLedgerTable(db);
 
     const row = db
-      .prepare(
-        "SELECT records, updated_at FROM ledger_documents WHERE id = ?",
-      )
+      .prepare("SELECT records, updated_at FROM ledger_documents WHERE id = ?")
       .get(ledgerId) as LedgerRow | undefined;
 
     if (row) {
@@ -73,6 +67,130 @@ export async function writeLedgerToSqlite(document: LedgerDocument) {
   }
 }
 
+export type AppUser = { id: string; username: string; passwordHash: string };
+
+export async function getRegisteredUser(): Promise<AppUser | null> {
+  const { db } = await openLedgerDatabase();
+  try {
+    ensureUserTable(db);
+    const row = db
+      .prepare("SELECT id, username, password_hash FROM app_users ORDER BY created_at LIMIT 1")
+      .get() as { id?: unknown; username?: unknown; password_hash?: unknown } | undefined;
+    if (
+      !row ||
+      typeof row.id !== "string" ||
+      typeof row.username !== "string" ||
+      typeof row.password_hash !== "string"
+    )
+      return null;
+    return { id: row.id, username: row.username, passwordHash: row.password_hash };
+  } finally {
+    db.close();
+  }
+}
+
+export async function createRegisteredUser(user: AppUser) {
+  const { db } = await openLedgerDatabase();
+  try {
+    ensureUserTable(db);
+    if (db.prepare("SELECT id FROM app_users LIMIT 1").get()) throw new Error("OWNER_EXISTS");
+    db.prepare(
+      "INSERT INTO app_users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+    ).run(user.id, user.username, user.passwordHash, new Date().toISOString());
+  } finally {
+    db.close();
+  }
+}
+
+export async function updateRegisteredUserPassword(passwordHash: string) {
+  const { db } = await openLedgerDatabase();
+  try {
+    ensureUserTable(db);
+    db.prepare("UPDATE app_users SET password_hash = ? WHERE id = ?").run(passwordHash, "owner");
+  } finally {
+    db.close();
+  }
+}
+
+export type AppSettings = {
+  siteTitle: string;
+  avatarUrl: string;
+  themeColor: string;
+  aiBaseUrl: string;
+  aiModel: string;
+  aiApiKey: string;
+  psPlusEnabled: boolean;
+  psPlusExpiresAt: string;
+  psPlusAutoAddMonthly: boolean;
+  nsOnlineEnabled: boolean;
+  nsOnlineExpiresAt: string;
+};
+
+export async function readAppSettings(): Promise<AppSettings> {
+  const { db } = await openLedgerDatabase();
+  try {
+    ensureSettingsTable(db);
+    const row = db.prepare("SELECT value FROM app_settings WHERE id = ?").get("default") as
+      | { value?: unknown }
+      | undefined;
+    return normalizeAppSettings(parseStoredJson(row?.value, {}));
+  } finally {
+    db.close();
+  }
+}
+
+export async function writeAppSettings(settings: AppSettings) {
+  const { db } = await openLedgerDatabase();
+  try {
+    ensureSettingsTable(db);
+    db.prepare(
+      `INSERT INTO app_settings (id, value) VALUES (?, ?)
+      ON CONFLICT(id) DO UPDATE SET value = excluded.value`,
+    ).run("default", JSON.stringify(settings));
+  } finally {
+    db.close();
+  }
+}
+
+export type AppCacheEntry = {
+  value: unknown;
+  expiresAt: string;
+  updatedAt: string;
+};
+
+export async function readAppCache(key: string): Promise<AppCacheEntry | null> {
+  const { db } = await openLedgerDatabase();
+  try {
+    ensureCacheTable(db);
+    const row = db
+      .prepare("SELECT value, expires_at, updated_at FROM app_cache WHERE id = ?")
+      .get(key) as { value?: unknown; expires_at?: unknown; updated_at?: unknown } | undefined;
+    if (!row || typeof row.expires_at !== "string" || typeof row.updated_at !== "string")
+      return null;
+    return {
+      value: parseStoredJson(row.value, null),
+      expiresAt: row.expires_at,
+      updatedAt: row.updated_at,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+export async function writeAppCache(key: string, value: unknown, expiresAt: string) {
+  const { db } = await openLedgerDatabase();
+  try {
+    ensureCacheTable(db);
+    db.prepare(
+      `INSERT INTO app_cache (id, value, expires_at, updated_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET value = excluded.value,
+        expires_at = excluded.expires_at, updated_at = excluded.updated_at`,
+    ).run(key, JSON.stringify(value), expiresAt, new Date().toISOString());
+  } finally {
+    db.close();
+  }
+}
+
 function ensureLedgerTable(db: DatabaseSync) {
   db.prepare(
     `CREATE TABLE IF NOT EXISTS ledger_documents (
@@ -83,6 +201,62 @@ function ensureLedgerTable(db: DatabaseSync) {
   ).run();
 }
 
+function ensureUserTable(db: DatabaseSync) {
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS app_users (
+      id TEXT PRIMARY KEY NOT NULL,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
+  ).run();
+}
+
+function ensureSettingsTable(db: DatabaseSync) {
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS app_settings (
+    id TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL DEFAULT '{}'
+  )`,
+  ).run();
+}
+
+function ensureCacheTable(db: DatabaseSync) {
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS app_cache (
+    id TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  ).run();
+}
+
+function normalizeAppSettings(value: unknown): AppSettings {
+  const source = value && typeof value === "object" ? (value as Partial<AppSettings>) : {};
+  return {
+    siteTitle:
+      typeof source.siteTitle === "string" && source.siteTitle.trim()
+        ? source.siteTitle.trim().slice(0, 40)
+        : "GameNote",
+    avatarUrl: typeof source.avatarUrl === "string" ? source.avatarUrl : "",
+    themeColor:
+      typeof source.themeColor === "string" && /^#[0-9a-f]{6}$/i.test(source.themeColor)
+        ? source.themeColor
+        : "#ef5b2a",
+    aiBaseUrl:
+      typeof source.aiBaseUrl === "string" && source.aiBaseUrl
+        ? source.aiBaseUrl
+        : "https://api.openai.com/v1",
+    aiModel: typeof source.aiModel === "string" && source.aiModel ? source.aiModel : "gpt-4.1-mini",
+    aiApiKey: typeof source.aiApiKey === "string" ? source.aiApiKey : "",
+    psPlusEnabled: source.psPlusEnabled === true,
+    psPlusExpiresAt: typeof source.psPlusExpiresAt === "string" ? source.psPlusExpiresAt : "",
+    psPlusAutoAddMonthly: source.psPlusAutoAddMonthly !== false,
+    nsOnlineEnabled: source.nsOnlineEnabled === true,
+    nsOnlineExpiresAt: typeof source.nsOnlineExpiresAt === "string" ? source.nsOnlineExpiresAt : "",
+  };
+}
+
 function writeLedgerToOpenSqlite(db: DatabaseSync, document: LedgerDocument) {
   db.prepare(
     `INSERT INTO ledger_documents (id, records, updated_at)
@@ -90,11 +264,7 @@ function writeLedgerToOpenSqlite(db: DatabaseSync, document: LedgerDocument) {
      ON CONFLICT(id) DO UPDATE SET
        records = excluded.records,
        updated_at = excluded.updated_at`,
-  ).run(
-    ledgerId,
-    JSON.stringify(document.records),
-    document.updatedAt,
-  );
+  ).run(ledgerId, JSON.stringify(document.records), document.updatedAt);
 }
 
 export async function openLedgerDatabase() {
@@ -137,15 +307,13 @@ async function readLegacyJsonLedger() {
 }
 
 function databaseFilePath() {
-  const configured =
-    process.env.APP_DATABASE_FILE || process.env.SWITCH_LEDGER_DATABASE_FILE;
+  const configured = process.env.APP_DATABASE_FILE || process.env.SWITCH_LEDGER_DATABASE_FILE;
 
   if (configured) {
     return normalizeDataPath(configured, "records.sqlite");
   }
 
-  const legacyDataFile =
-    process.env.APP_DATA_FILE || process.env.SWITCH_LEDGER_DATA_FILE;
+  const legacyDataFile = process.env.APP_DATA_FILE || process.env.SWITCH_LEDGER_DATA_FILE;
 
   if (legacyDataFile) {
     return deriveDatabasePath(legacyDataFile);
@@ -155,8 +323,7 @@ function databaseFilePath() {
 }
 
 function legacyJsonFilePath() {
-  const legacyDataFile =
-    process.env.APP_DATA_FILE || process.env.SWITCH_LEDGER_DATA_FILE;
+  const legacyDataFile = process.env.APP_DATA_FILE || process.env.SWITCH_LEDGER_DATA_FILE;
 
   if (legacyDataFile) {
     return normalizeDataPath(legacyDataFile, "records.json");
@@ -274,8 +441,7 @@ function defaultDatabaseFilePath() {
 
 function describeDatabaseDirectoryError(directory: string, error: unknown) {
   const detail = error instanceof Error ? error.message : String(error);
-  const hint =
-    "Docker 运行请确认 APP_DATABASE_FILE=/data/records.sqlite，并挂载 ./data:/data";
+  const hint = "Docker 运行请确认 APP_DATABASE_FILE=/data/records.sqlite，并挂载 ./data:/data";
 
   return [`无法创建数据库目录 ${directory}`, hint, detail && `原始错误：${detail}`]
     .filter(Boolean)

@@ -8,9 +8,7 @@ type WikidataEntityResponse = {
   entities?: Record<
     string,
     {
-      labels?: Partial<
-        Record<"en" | "zh" | "zh-cn" | "zh-hans" | "zh-hant", WikidataTextValue>
-      >;
+      labels?: Partial<Record<"en" | "zh" | "zh-cn" | "zh-hans" | "zh-hant", WikidataTextValue>>;
       sitelinks?: Partial<Record<"enwiki" | "zhwiki", { title?: string }>>;
     }
   >;
@@ -22,10 +20,7 @@ export type ResolvedGameTitle = {
 };
 
 const hanPattern = /[\u3400-\u9fff]/u;
-const titleCache = new Map<
-  string,
-  { expiresAt: number; value: ResolvedGameTitle[] }
->();
+const titleCache = new Map<string, { expiresAt: number; value: ResolvedGameTitle[] }>();
 const titleCacheTtl = 24 * 60 * 60 * 1000;
 
 export async function resolveGameTitles(query: string): Promise<ResolvedGameTitle[]> {
@@ -68,9 +63,7 @@ export async function resolveGameTitles(query: string): Promise<ResolvedGameTitl
       for (const item of searchPayload.search ?? []) {
         if (
           item.id &&
-          /\bvideo game\b|\bgame\b|游戏|遊戲|電玩/i.test(
-            item.description ?? "",
-          ) &&
+          /\bvideo game\b|\bgame\b|游戏|遊戲|電玩/i.test(item.description ?? "") &&
           !gameIds.includes(item.id)
         ) {
           gameIds.push(item.id);
@@ -133,15 +126,10 @@ export async function resolveGameTitles(query: string): Promise<ResolvedGameTitl
 }
 
 export async function resolveEnglishGameTitles(query: string) {
-  return (await resolveGameTitles(query))
-    .map((title) => title.englishTitle)
-    .filter(Boolean);
+  return (await resolveGameTitles(query)).map((title) => title.englishTitle).filter(Boolean);
 }
 
-export function findChineseGameTitle(
-  officialTitle: string,
-  resolvedTitles: ResolvedGameTitle[],
-) {
+export function findChineseGameTitle(officialTitle: string, resolvedTitles: ResolvedGameTitle[]) {
   const normalizedOfficial = normalizeComparableTitle(officialTitle);
   let bestMatch: { score: number; title: string } | null = null;
 
@@ -190,10 +178,7 @@ function buildTitleLookupCandidates(value: string) {
   return [...candidates].slice(0, 2);
 }
 
-function localizeResolvedTitle(
-  officialTitle: string,
-  resolved: ResolvedGameTitle,
-) {
+function localizeResolvedTitle(officialTitle: string, resolved: ResolvedGameTitle) {
   const normalizedOfficial = normalizeComparableTitle(officialTitle);
   const normalizedEnglish = normalizeComparableTitle(resolved.englishTitle);
 
@@ -307,9 +292,7 @@ async function translateTitle(value: string, targetLanguage: "en" | "zh-CN") {
 }
 
 function cleanWikipediaTitle(value: string) {
-  return value
-    .replace(/\s*[（(](?:video game|電子遊戲|电子游戏|遊戲|游戏)[）)]$/iu, "")
-    .trim();
+  return value.replace(/\s*[（(](?:video game|電子遊戲|电子游戏|遊戲|游戏)[）)]$/iu, "").trim();
 }
 
 function normalizeComparableTitle(value: string) {

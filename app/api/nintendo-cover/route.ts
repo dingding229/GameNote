@@ -3,12 +3,12 @@ import {
   normalizeChineseGameTitle,
   toSimplifiedChinese,
   toTraditionalChinese,
-} from "@/lib/chinese";
+} from "@/lib/game/title-normalization";
 import {
   findChineseGameTitle,
   resolveGameTitles,
   type ResolvedGameTitle,
-} from "@/lib/game-title";
+} from "@/lib/game/title-resolution";
 
 export const runtime = "edge";
 
@@ -136,17 +136,14 @@ export async function GET(request: NextRequest) {
     const results = await searchNintendo(query);
     return NextResponse.json({ results });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Nintendo cover lookup failed";
+    const message = error instanceof Error ? error.message : "Nintendo cover lookup failed";
     return NextResponse.json({ error: message, results: [] }, { status: 502 });
   }
 }
 
 async function searchNintendo(query: string): Promise<CoverResult[]> {
   const resolvedTitles = await resolveGameTitles(query);
-  const englishTitles = resolvedTitles
-    .map((title) => title.englishTitle)
-    .filter(Boolean);
+  const englishTitles = resolvedTitles.map((title) => title.englishTitle).filter(Boolean);
   const [mainlandLookup, hongKongLookup, algoliaLookup] = await Promise.allSettled([
     searchNintendoMainland(query, englishTitles),
     searchNintendoHongKong(query, englishTitles),
@@ -172,16 +169,8 @@ async function searchNintendo(query: string): Promise<CoverResult[]> {
   return dedupeCoverResults(results)
     .sort(
       (left, right) =>
-        Math.max(
-          ...relevanceQueries.map((variant) =>
-            scoreHit({ title: right.title }, variant),
-          ),
-        ) -
-        Math.max(
-          ...relevanceQueries.map((variant) =>
-            scoreHit({ title: left.title }, variant),
-          ),
-        ),
+        Math.max(...relevanceQueries.map((variant) => scoreHit({ title: right.title }, variant))) -
+        Math.max(...relevanceQueries.map((variant) => scoreHit({ title: left.title }, variant))),
     )
     .slice(0, 12)
     .map((result) => withChineseDisplayTitle(result, resolvedTitles));
@@ -221,9 +210,7 @@ async function searchNintendoMainland(
   return hits
     .map((hit) => ({
       hit,
-      score: Math.max(
-        ...variants.map((variant) => scoreMainlandHit(hit, variant)),
-      ),
+      score: Math.max(...variants.map((variant) => scoreMainlandHit(hit, variant))),
     }))
     .filter(({ score }) => score >= 24)
     .sort((left, right) => right.score - left.score)
@@ -258,10 +245,7 @@ async function searchNintendoHongKong(
       return hits
         .map((hit) => ({
           hit,
-          score: Math.max(
-            scoreHongKongHit(hit, query),
-            scoreHongKongHit(hit, variant),
-          ),
+          score: Math.max(scoreHongKongHit(hit, query), scoreHongKongHit(hit, variant)),
         }))
         .filter(({ score }) => score >= 20)
         .sort((left, right) => right.score - left.score)
@@ -285,24 +269,21 @@ async function searchNintendoAlgolia(
     attributesToRetrieve: JSON.stringify(retrieveAttributes),
   });
 
-  const response = await fetch(
-    `https://${algoliaAppId}-dsn.algolia.net/1/indexes/*/queries`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-algolia-api-key": algoliaApiKey,
-        "x-algolia-application-id": algoliaAppId,
-      },
-      body: JSON.stringify({
-        requests: variants.map((variant) => ({
-          indexName: algoliaIndex,
-          query: variant,
-          params: params.toString(),
-        })),
-      }),
+  const response = await fetch(`https://${algoliaAppId}-dsn.algolia.net/1/indexes/*/queries`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-algolia-api-key": algoliaApiKey,
+      "x-algolia-application-id": algoliaAppId,
     },
-  );
+    body: JSON.stringify({
+      requests: variants.map((variant) => ({
+        indexName: algoliaIndex,
+        query: variant,
+        params: params.toString(),
+      })),
+    }),
+  });
 
   if (!response.ok) {
     throw new Error(`Nintendo search returned ${response.status}`);
@@ -491,9 +472,7 @@ async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | n
   }
 
   if (host === "store.nintendo.com.hk" && hongKongNsuid) {
-    return fetchNintendoPageCover(
-      `https://ec.nintendo.com/HK/zh/titles/${hongKongNsuid}`,
-    );
+    return fetchNintendoPageCover(`https://ec.nintendo.com/HK/zh/titles/${hongKongNsuid}`);
   }
 
   const response = await fetch(url.toString(), {
@@ -509,7 +488,7 @@ async function fetchNintendoPageCover(inputUrl: string): Promise<CoverResult | n
   const rawTitle = extractMetaContent(html, "og:title");
   const canonicalUrl = extractCanonicalUrl(html) ?? url.toString();
   const price = hongKongNsuid
-    ? (await fetchHongKongPrices([hongKongNsuid])).get(hongKongNsuid) ?? null
+    ? ((await fetchHongKongPrices([hongKongNsuid])).get(hongKongNsuid) ?? null)
     : null;
 
   if (!coverUrl) {
@@ -556,11 +535,7 @@ function toHongKongCoverResult(hit: HongKongHit): CoverResult | null {
     platform: `${normalizeChineseGameTitle(
       hit.hardwareCategory ?? "Nintendo Switch",
     )}${categories}`,
-    releaseDate:
-      hit.releaseDatePackage ??
-      hit.releaseDateDownload ??
-      hit.releaseDate ??
-      null,
+    releaseDate: hit.releaseDatePackage ?? hit.releaseDateDownload ?? hit.releaseDate ?? null,
     price: null,
     currency: null,
     source: "hong-kong",
@@ -568,9 +543,7 @@ function toHongKongCoverResult(hit: HongKongHit): CoverResult | null {
 }
 
 async function hydrateHongKongPrices(results: CoverResult[]) {
-  const ids = results
-    .map((result) => result.id)
-    .filter((id) => /^\d{14}$/.test(id));
+  const ids = results.map((result) => result.id).filter((id) => /^\d{14}$/.test(id));
   const priceMap = await fetchHongKongPrices(ids);
 
   return results.map((result) => {
@@ -726,11 +699,7 @@ function toCoverResult(hit: NintendoHit): CoverResult | null {
     nintendoUrl,
     platform: hit.platform ?? "Nintendo Switch",
     releaseDate: hit.releaseDate ?? null,
-    price:
-      hit.price?.finalPrice ??
-      hit.price?.regPrice ??
-      hit.eshopDetails?.regularPrice ??
-      null,
+    price: hit.price?.finalPrice ?? hit.price?.regPrice ?? hit.eshopDetails?.regularPrice ?? null,
     currency: hit.eshopDetails?.currency ?? null,
     source: "algolia",
   };
@@ -819,8 +788,7 @@ function extractMainlandHits(html: string): MainlandHit[] {
 
   hits.push(...assignedHits.values());
 
-  const objectPattern =
-    /\{title:((?:"(?:\\.|[^"\\])*")|[A-Za-z_$][\w$]*)[^{}]*?\}/g;
+  const objectPattern = /\{title:((?:"(?:\\.|[^"\\])*")|[A-Za-z_$][\w$]*)[^{}]*?\}/g;
 
   for (const match of text.matchAll(objectPattern)) {
     const [block, rawTitle] = match;
@@ -927,11 +895,7 @@ function splitTopLevelArguments(value: string) {
   return tokens;
 }
 
-function extractMainlandObjectField(
-  block: string,
-  field: string,
-  variables: Map<string, string>,
-) {
+function extractMainlandObjectField(block: string, field: string, variables: Map<string, string>) {
   const pattern = new RegExp(
     `${field}:((?:"(?:\\\\.|[^"\\\\])*")|[A-Za-z_$][\\w$]*|-?\\d+(?:\\.\\d+)?)`,
   );
@@ -968,11 +932,7 @@ function parseMainlandStringToken(value: string) {
   return decodeHtml(decodeScriptEscapes(trimmed.slice(1, -1))) ?? "";
 }
 
-function setMainlandHitField(
-  hit: MainlandHit,
-  field: string,
-  value: string | number,
-) {
+function setMainlandHitField(hit: MainlandHit, field: string, value: string | number) {
   if (field === "price") {
     hit.price = typeof value === "number" ? value : Number(value) || undefined;
     return;
@@ -999,9 +959,7 @@ function dedupeMainlandHits(hits: MainlandHit[]) {
   const seen = new Set<string>();
 
   return hits.filter((hit) => {
-    const key = normalizeSearchText(
-      `${hit.title ?? ""} ${hit.jumpUrl ?? ""} ${hit.imgUrl ?? ""}`,
-    );
+    const key = normalizeSearchText(`${hit.title ?? ""} ${hit.jumpUrl ?? ""} ${hit.imgUrl ?? ""}`);
 
     if (!key || seen.has(key)) {
       return false;
@@ -1066,10 +1024,7 @@ function dedupeCoverResults(results: CoverResult[]) {
   });
 }
 
-function buildMainlandQueryVariants(
-  query: string,
-  englishTitles: string[] = [],
-) {
+function buildMainlandQueryVariants(query: string, englishTitles: string[] = []) {
   const trimmed = query.trim();
   const simplified = toSimplifiedText(trimmed);
   const mainland = applyMainlandTitleStyle(simplified);
@@ -1092,10 +1047,7 @@ function buildMainlandQueryVariants(
   for (const [pattern, replacement] of aliasEntries) {
     if (pattern.test(normalized) || pattern.test(trimmed)) {
       variants.add(applyMainlandTitleStyle(simplified.replace(pattern, replacement)));
-      if (
-        normalizeSearchText(simplified).length <=
-        normalizeSearchText(replacement).length + 1
-      ) {
+      if (normalizeSearchText(simplified).length <= normalizeSearchText(replacement).length + 1) {
         variants.add(replacement);
       }
     }
@@ -1104,10 +1056,7 @@ function buildMainlandQueryVariants(
   return [...variants].filter(Boolean).slice(0, 8);
 }
 
-function buildHongKongQueryVariants(
-  query: string,
-  englishTitles: string[] = [],
-) {
+function buildHongKongQueryVariants(query: string, englishTitles: string[] = []) {
   const trimmed = query.trim();
   const simplified = toSimplifiedText(trimmed);
   const traditional = toTraditionalSearchText(simplified);
@@ -1138,10 +1087,7 @@ function buildHongKongQueryVariants(
     if (pattern.test(normalized) || pattern.test(trimmed)) {
       variants.add(trimmed.replace(pattern, replacement));
       variants.add(traditional.replace(pattern, replacement));
-      if (
-        normalizeSearchText(trimmed).length <=
-        normalizeSearchText(replacement).length + 1
-      ) {
+      if (normalizeSearchText(trimmed).length <= normalizeSearchText(replacement).length + 1) {
         variants.add(replacement);
       }
     }
@@ -1820,12 +1766,8 @@ function decodeHtml(value: string | null) {
 
 function decodeScriptEscapes(value: string) {
   return value
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code: string) =>
-      String.fromCharCode(parseInt(code, 16)),
-    )
-    .replace(/\\x([0-9a-fA-F]{2})/g, (_, code: string) =>
-      String.fromCharCode(parseInt(code, 16)),
-    )
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code: string) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, code: string) => String.fromCharCode(parseInt(code, 16)))
     .replaceAll("\\/", "/")
     .replaceAll('\\"', '"')
     .replaceAll("\\'", "'");
