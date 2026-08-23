@@ -12,7 +12,6 @@ import type {
   Region,
   SaveStatus,
   ShareOptions,
-  StatsPlatformScope,
 } from "./types";
 
 const currencyFormatter = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
@@ -336,17 +335,6 @@ export function setViewUrl(view: ActiveView, mode: "push" | "replace" = "push") 
         : platformPath(platformFromPath(window.location.pathname) || "Nintendo Switch");
   if (window.location.pathname === path) return;
   window.history[mode === "push" ? "pushState" : "replaceState"]({ view }, "", path);
-}
-export function isStatsPlatformScope(value: unknown): value is StatsPlatformScope {
-  return value === "all" || value === "nintendo-switch" || value === "playstation";
-}
-export function statsScopeLabel(scope: StatsPlatformScope) {
-  return { all: "NS + PS", "nintendo-switch": "仅 NS", playstation: "仅 PS" }[scope];
-}
-export function recordMatchesStatsScope(record: GameRecord, scope: StatsPlatformScope) {
-  if (scope === "nintendo-switch") return record.platform === "Nintendo Switch";
-  if (scope === "playstation") return record.platform === "PlayStation";
-  return true;
 }
 export function textMatchesQuery(value: string, normalizedQuery: string) {
   const normalizedValue = normalizeChineseSearchText(value);

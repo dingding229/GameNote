@@ -9,7 +9,7 @@ type FrankfurterResponse = {
   rates?: Record<string, unknown>;
 };
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 export async function GET() {
   try {

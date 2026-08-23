@@ -13,7 +13,7 @@ import {
   type ResolvedGameTitle,
 } from "@/lib/game/title-resolution";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 type PlayStationMedia = {
   role?: string;

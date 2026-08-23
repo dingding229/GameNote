@@ -26,7 +26,6 @@ export type AccessStatus = "checking" | "locked" | "unlocked";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 export type ActiveView = "records" | "form" | "settings" | "ps-plus-catalog" | "memberships";
 export type RecordDisplayMode = "grid" | "list";
-export type StatsPlatformScope = "all" | "nintendo-switch" | "playstation";
 
 export type ShareOptions = {
   showPrice: boolean;
@@ -54,6 +53,10 @@ export type SettingsState = {
   siteTitle: string;
   avatarUrl: string;
   themeColor: string;
+  showNintendoSwitch: boolean;
+  showPlayStation: boolean;
+  showPsPlusCatalog: boolean;
+  showMemberships: boolean;
   aiBaseUrl: string;
   aiModel: string;
   aiApiKey: string;
@@ -115,11 +118,6 @@ export type ExchangeRatePayload = {
   date: string;
   rates: Partial<Record<Currency, number>>;
   source: string;
-};
-
-export type AppConfigPayload = {
-  statsPlatforms?: StatsPlatformScope;
-  error?: string;
 };
 
 export type ToolbarItem = {

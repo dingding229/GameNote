@@ -22,7 +22,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV APP_DATABASE_FILE=/data/records.sqlite
-ENV APP_STATS_PLATFORMS=all
 
 RUN apk add --no-cache su-exec \
   && addgroup -S nodejs \

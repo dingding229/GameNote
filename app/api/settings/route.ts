@@ -20,11 +20,15 @@ export async function GET(request: NextRequest) {
     siteTitle: settings.siteTitle,
     avatarUrl: settings.avatarUrl,
     themeColor: settings.themeColor,
+    showNintendoSwitch: settings.showNintendoSwitch,
+    showPlayStation: settings.showPlayStation,
+    showPsPlusCatalog: settings.showPsPlusCatalog,
+    showMemberships: settings.showMemberships,
     ...(identity
       ? {
           aiBaseUrl: settings.aiBaseUrl,
           aiModel: settings.aiModel,
-          aiApiKeyConfigured: Boolean(settings.aiApiKey || process.env.OPENAI_API_KEY),
+          aiApiKeyConfigured: Boolean(settings.aiApiKey),
           psPlusEnabled: settings.psPlusEnabled,
           psPlusExpiresAt: settings.psPlusExpiresAt,
           psPlusAutoAddMonthly: settings.psPlusAutoAddMonthly,
@@ -49,6 +53,22 @@ export async function PUT(request: NextRequest) {
     typeof payload.themeColor === "string" && /^#[0-9a-f]{6}$/i.test(payload.themeColor)
       ? payload.themeColor
       : current.themeColor;
+  const showNintendoSwitch =
+    typeof payload.showNintendoSwitch === "boolean"
+      ? payload.showNintendoSwitch
+      : current.showNintendoSwitch;
+  const showPlayStation =
+    typeof payload.showPlayStation === "boolean"
+      ? payload.showPlayStation
+      : current.showPlayStation;
+  const showPsPlusCatalog =
+    typeof payload.showPsPlusCatalog === "boolean"
+      ? payload.showPsPlusCatalog
+      : current.showPsPlusCatalog;
+  const showMemberships =
+    typeof payload.showMemberships === "boolean"
+      ? payload.showMemberships
+      : current.showMemberships;
   const aiBaseUrl =
     typeof payload.aiBaseUrl === "string"
       ? payload.aiBaseUrl.trim().replace(/\/$/, "")
@@ -79,6 +99,7 @@ export async function PUT(request: NextRequest) {
   if (payload.clearAiApiKey === true) aiApiKey = "";
   if (
     !siteTitle ||
+    (!showNintendoSwitch && !showPlayStation) ||
     !aiModel ||
     !isSecureHttpUrl(aiBaseUrl) ||
     !datePattern.test(psPlusExpiresAt) ||
@@ -91,6 +112,10 @@ export async function PUT(request: NextRequest) {
     siteTitle,
     avatarUrl,
     themeColor,
+    showNintendoSwitch,
+    showPlayStation,
+    showPsPlusCatalog,
+    showMemberships,
     aiBaseUrl,
     aiModel,
     aiApiKey,
@@ -104,9 +129,13 @@ export async function PUT(request: NextRequest) {
     siteTitle,
     avatarUrl,
     themeColor,
+    showNintendoSwitch,
+    showPlayStation,
+    showPsPlusCatalog,
+    showMemberships,
     aiBaseUrl,
     aiModel,
-    aiApiKeyConfigured: Boolean(aiApiKey || process.env.OPENAI_API_KEY),
+    aiApiKeyConfigured: Boolean(aiApiKey),
     psPlusEnabled,
     psPlusExpiresAt,
     psPlusAutoAddMonthly,

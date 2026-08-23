@@ -14,9 +14,9 @@ export async function POST(request: NextRequest) {
   }
 
   const settings = await readAppSettings();
-  const apiKey = settings.aiApiKey || process.env.OPENAI_API_KEY;
+  const apiKey = settings.aiApiKey;
   if (!apiKey) {
-    return NextResponse.json({ error: "未配置 OPENAI_API_KEY，无法使用图片识别" }, { status: 503 });
+    return NextResponse.json({ error: "请先在后台设置中配置 AI API Key" }, { status: 503 });
   }
 
   const formData = await request.formData().catch(() => null);
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({
-        model: settings.aiModel || process.env.OPENAI_VISION_MODEL || "gpt-4.1-mini",
+        model: settings.aiModel,
         input: [{ role: "user", content }],
         text: {
           format: {

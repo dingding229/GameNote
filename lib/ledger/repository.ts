@@ -116,6 +116,10 @@ export type AppSettings = {
   siteTitle: string;
   avatarUrl: string;
   themeColor: string;
+  showNintendoSwitch: boolean;
+  showPlayStation: boolean;
+  showPsPlusCatalog: boolean;
+  showMemberships: boolean;
   aiBaseUrl: string;
   aiModel: string;
   aiApiKey: string;
@@ -243,6 +247,10 @@ function normalizeAppSettings(value: unknown): AppSettings {
       typeof source.themeColor === "string" && /^#[0-9a-f]{6}$/i.test(source.themeColor)
         ? source.themeColor
         : "#ef5b2a",
+    showNintendoSwitch: source.showNintendoSwitch !== false,
+    showPlayStation: source.showPlayStation !== false,
+    showPsPlusCatalog: source.showPsPlusCatalog !== false,
+    showMemberships: source.showMemberships !== false,
     aiBaseUrl:
       typeof source.aiBaseUrl === "string" && source.aiBaseUrl
         ? source.aiBaseUrl

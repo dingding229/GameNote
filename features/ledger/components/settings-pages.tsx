@@ -53,7 +53,7 @@ export function SettingsPage({
       <header>
         <p className="ledger-kicker">Settings</p>
         <h2>设置</h2>
-        <span>管理外观、AI 识别、数据备份和账户安全</span>
+        <span>管理内容展示、外观、AI 识别、数据备份和账户安全</span>
       </header>
       <section className="settings-section">
         <div>
@@ -86,6 +86,70 @@ export function SettingsPage({
             <span>头像图片（小于 500KB）</span>
             <input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectAvatar} />
             {settings.avatarUrl ? <img src={settings.avatarUrl} alt="头像预览" /> : null}
+          </label>
+        </div>
+      </section>
+      <section className="settings-section">
+        <div>
+          <h3>内容展示</h3>
+          <p>选择侧边栏展示的游戏库和工具；至少保留一个游戏库。</p>
+        </div>
+        <div className="settings-fields">
+          <strong className="settings-wide">游戏库</strong>
+          <label className="checkbox-field settings-wide">
+            <input
+              type="checkbox"
+              checked={settings.showNintendoSwitch}
+              disabled={settings.showNintendoSwitch && !settings.showPlayStation}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  showNintendoSwitch: event.target.checked,
+                }))
+              }
+            />
+            <span>展示 Nintendo Switch 游戏库</span>
+          </label>
+          <label className="checkbox-field settings-wide">
+            <input
+              type="checkbox"
+              checked={settings.showPlayStation}
+              disabled={settings.showPlayStation && !settings.showNintendoSwitch}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  showPlayStation: event.target.checked,
+                }))
+              }
+            />
+            <span>展示 PlayStation 游戏库</span>
+          </label>
+          <strong className="settings-wide">工具</strong>
+          <label className="checkbox-field settings-wide">
+            <input
+              type="checkbox"
+              checked={settings.showPsPlusCatalog}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  showPsPlusCatalog: event.target.checked,
+                }))
+              }
+            />
+            <span>展示 PS Plus 游戏库</span>
+          </label>
+          <label className="checkbox-field settings-wide">
+            <input
+              type="checkbox"
+              checked={settings.showMemberships}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  showMemberships: event.target.checked,
+                }))
+              }
+            />
+            <span>展示会员记录</span>
           </label>
         </div>
       </section>

@@ -10,7 +10,12 @@ export { accessCookieName };
 
 export function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
-  if (secret) return secret;
+  if (secret) {
+    if (process.env.NODE_ENV === "production" && Buffer.byteLength(secret, "utf8") < 32) {
+      throw new Error("JWT_SECRET 至少需要 32 字节");
+    }
+    return secret;
+  }
   if (process.env.NODE_ENV !== "production") return "gamenote-local-development-secret";
   throw new Error("JWT_SECRET 未配置");
 }

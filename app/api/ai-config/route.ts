@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
   const apiKey =
     typeof payload.apiKey === "string" && payload.apiKey.trim()
       ? payload.apiKey.trim()
-      : saved.aiApiKey || process.env.OPENAI_API_KEY || "";
+      : saved.aiApiKey;
 
   if (!action || !baseUrl.toLowerCase().startsWith("https://") || !apiKey) {
     return NextResponse.json({ error: "请填写有效的 HTTPS API 地址和 API Key" }, { status: 400 });

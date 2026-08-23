@@ -24,7 +24,6 @@ import {
 import type {
   AccessStatus,
   ActiveView,
-  AppConfigPayload,
   Currency,
   ExchangeRatePayload,
   FormState,
@@ -39,7 +38,6 @@ import type {
   SaveStatus,
   SettingsState,
   ShareOptions,
-  StatsPlatformScope,
   ToolbarGroup,
 } from "./types";
 import {
@@ -55,7 +53,6 @@ import {
   formatMoney,
   formatOptionsForPlatform,
   isPhysicalFormat,
-  isStatsPlatformScope,
   lookupPriceLabel,
   normalizeFormatForPlatform,
   normalizeLookupCurrency,
@@ -63,11 +60,9 @@ import {
   officialUrlPlaceholder,
   platformFromPath,
   platformLabel,
-  recordMatchesStatsScope,
   saveStatusLabel,
   setPlatformUrl,
   setViewUrl,
-  statsScopeLabel,
   sumRecordsInCny,
   textMatchesQuery,
   todayString,
@@ -122,12 +117,14 @@ export default function LedgerClient({
   const [coverError, setCoverError] = useState("");
   const [exchangeRates, setExchangeRates] = useState<ExchangeRatePayload | null>(null);
   const [exchangeError, setExchangeError] = useState("");
-  const [statsScope, setStatsScope] = useState<StatsPlatformScope>("all");
-  const [configError, setConfigError] = useState("");
   const [settings, setSettings] = useState<SettingsState>({
     siteTitle: "GameNote",
     avatarUrl: "",
     themeColor: "#ef5b2a",
+    showNintendoSwitch: true,
+    showPlayStation: true,
+    showPsPlusCatalog: true,
+    showMemberships: true,
     aiBaseUrl: "https://api.openai.com/v1",
     aiModel: "gpt-4.1-mini",
     aiApiKey: "",
@@ -140,6 +137,7 @@ export default function LedgerClient({
     nsOnlineEnabled: false,
     nsOnlineExpiresAt: "",
   });
+  const [settingsReady, setSettingsReady] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState("");
   const [aiActionStatus, setAiActionStatus] = useState("");
   const [aiModels, setAiModels] = useState<string[]>([]);
@@ -245,10 +243,14 @@ export default function LedgerClient({
         if (!response.ok) throw new Error("无法读取设置");
         if (cancelled) return;
         setSettings((current) => ({ ...current, ...payload }));
+        setSettingsReady(true);
         if (payload.themeColor) updateThemeColor(payload.themeColor);
         if (payload.siteTitle) document.title = payload.siteTitle;
       } catch {
-        if (!cancelled) setSettingsStatus("无法读取设置");
+        if (!cancelled) {
+          setSettingsReady(true);
+          setSettingsStatus("无法读取设置");
+        }
       }
     }
 
@@ -257,6 +259,37 @@ export default function LedgerClient({
       cancelled = true;
     };
   }, [accessStatus]);
+
+  useEffect(() => {
+    if (!settingsReady || activeView === "settings") return;
+
+    const preferredPlatform: GamePlatform = settings.showNintendoSwitch
+      ? "Nintendo Switch"
+      : "PlayStation";
+    const activeLibraryHidden =
+      activeView === "records" || activeView === "form"
+        ? activePlatform === "Nintendo Switch"
+          ? !settings.showNintendoSwitch
+          : !settings.showPlayStation
+        : false;
+    const activeToolHidden =
+      (activeView === "ps-plus-catalog" && !settings.showPsPlusCatalog) ||
+      (activeView === "memberships" && !settings.showMemberships);
+
+    if (activeLibraryHidden || activeToolHidden) {
+      applyPlatformPage(preferredPlatform, "replace");
+      setActiveView("records");
+    }
+  }, [
+    activePlatform,
+    activeView,
+    applyPlatformPage,
+    settings.showMemberships,
+    settings.showNintendoSwitch,
+    settings.showPlayStation,
+    settings.showPsPlusCatalog,
+    settingsReady,
+  ]);
 
   function updateThemeColor(color: string) {
     document.documentElement.style.setProperty("--color-primary", color);
@@ -514,41 +547,6 @@ export default function LedgerClient({
   }, [accessStatus]);
 
   useEffect(() => {
-    if (accessStatus === "checking") {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadAppConfig() {
-      try {
-        const response = await fetch("/api/config", { cache: "no-store" });
-        const payload = (await response.json().catch(() => ({}))) as AppConfigPayload;
-
-        if (!response.ok || !isStatsPlatformScope(payload.statsPlatforms)) {
-          throw new Error(payload.error || "无法读取统计配置");
-        }
-
-        if (!cancelled) {
-          setStatsScope(payload.statsPlatforms);
-          setConfigError("");
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setStatsScope("all");
-          setConfigError(error instanceof Error ? error.message : "无法读取统计配置");
-        }
-      }
-    }
-
-    loadAppConfig();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessStatus]);
-
-  useEffect(() => {
     if (!storageReady || !recordsDirty || accessStatus !== "unlocked") {
       return;
     }
@@ -631,9 +629,20 @@ export default function LedgerClient({
   );
 
   const statsRecords = useMemo(
-    () => records.filter((record) => recordMatchesStatsScope(record, statsScope)),
-    [records, statsScope],
+    () =>
+      records.filter((record) =>
+        record.platform === "Nintendo Switch"
+          ? settings.showNintendoSwitch
+          : settings.showPlayStation,
+      ),
+    [records, settings.showNintendoSwitch, settings.showPlayStation],
   );
+
+  const statsLibraryLabel = settings.showNintendoSwitch
+    ? settings.showPlayStation
+      ? "NS + PS"
+      : "仅 NS"
+    : "仅 PS";
 
   const filteredRecords = useMemo(() => {
     const normalizedQuery = normalizeChineseSearchText(query);
@@ -1107,53 +1116,63 @@ export default function LedgerClient({
     );
   }
 
+  const libraryToolbarItems: ToolbarGroup["items"] = [
+    ...(settings.showNintendoSwitch
+      ? [
+          {
+            id: "nintendo-switch",
+            label: "Nintendo Switch",
+            icon: "NS",
+            badge: switchCount,
+            active: activeView === "records" && activePlatform === "Nintendo Switch",
+            onSelect: () => switchPlatformPage("Nintendo Switch"),
+          },
+        ]
+      : []),
+    ...(settings.showPlayStation
+      ? [
+          {
+            id: "playstation",
+            label: "PlayStation",
+            icon: "PS",
+            badge: playStationCount,
+            active: activeView === "records" && activePlatform === "PlayStation",
+            onSelect: () => switchPlatformPage("PlayStation"),
+          },
+        ]
+      : []),
+  ];
+  const toolToolbarItems: ToolbarGroup["items"] = [
+    ...(settings.showPsPlusCatalog
+      ? [
+          {
+            id: "ps-plus-catalog",
+            label: "PS Plus 游戏库",
+            icon: "P+",
+            active: activeView === "ps-plus-catalog",
+            onSelect: () => switchView("ps-plus-catalog"),
+          },
+        ]
+      : []),
+    ...(accessStatus === "unlocked" && settings.showMemberships
+      ? [
+          {
+            id: "memberships",
+            label: "会员记录",
+            icon: "会",
+            active: activeView === "memberships",
+            onSelect: () => switchView("memberships"),
+          },
+        ]
+      : []),
+  ];
   const toolbarGroups: ToolbarGroup[] = [
     {
       id: "library",
       label: "游戏库",
-      items: [
-        {
-          id: "nintendo-switch",
-          label: "Nintendo Switch",
-          icon: "NS",
-          badge: switchCount,
-          active: activeView === "records" && activePlatform === "Nintendo Switch",
-          onSelect: () => switchPlatformPage("Nintendo Switch"),
-        },
-        {
-          id: "playstation",
-          label: "PlayStation",
-          icon: "PS",
-          badge: playStationCount,
-          active: activeView === "records" && activePlatform === "PlayStation",
-          onSelect: () => switchPlatformPage("PlayStation"),
-        },
-      ],
+      items: libraryToolbarItems,
     },
-    {
-      id: "tools",
-      label: "工具",
-      items: [
-        {
-          id: "ps-plus-catalog",
-          label: "PS Plus 游戏库",
-          icon: "P+",
-          active: activeView === "ps-plus-catalog",
-          onSelect: () => switchView("ps-plus-catalog"),
-        },
-        ...(accessStatus === "unlocked"
-          ? [
-              {
-                id: "memberships",
-                label: "会员记录",
-                icon: "会",
-                active: activeView === "memberships",
-                onSelect: () => switchView("memberships"),
-              },
-            ]
-          : []),
-      ],
-    },
+    ...(toolToolbarItems.length ? [{ id: "tools", label: "工具", items: toolToolbarItems }] : []),
     ...(accessStatus === "unlocked"
       ? [
           {
@@ -1268,35 +1287,43 @@ export default function LedgerClient({
               <AppToolbar groups={toolbarGroups} compact />
               <div className="legacy-mobile-tools">
                 <div className="mobile-platforms">
-                  {gamePlatforms.map((platform) => (
-                    <button
-                      key={platform}
-                      className={`platform-tab ${
-                        activeView === "records" && activePlatform === platform ? "active" : ""
-                      }`}
-                      aria-pressed={activePlatform === platform}
-                      type="button"
-                      onClick={() => switchPlatformPage(platform)}
-                    >
-                      {platform === "PlayStation"
-                        ? `PlayStation ${playStationCount}`
-                        : `Nintendo Switch ${switchCount}`}
-                    </button>
-                  ))}
+                  {gamePlatforms
+                    .filter((platform) =>
+                      platform === "Nintendo Switch"
+                        ? settings.showNintendoSwitch
+                        : settings.showPlayStation,
+                    )
+                    .map((platform) => (
+                      <button
+                        key={platform}
+                        className={`platform-tab ${
+                          activeView === "records" && activePlatform === platform ? "active" : ""
+                        }`}
+                        aria-pressed={activePlatform === platform}
+                        type="button"
+                        onClick={() => switchPlatformPage(platform)}
+                      >
+                        {platform === "PlayStation"
+                          ? `PlayStation ${playStationCount}`
+                          : `Nintendo Switch ${switchCount}`}
+                      </button>
+                    ))}
                 </div>
-                <button
-                  className={
-                    "platform-tab catalog-mobile-tab " +
-                    (activeView === "ps-plus-catalog" ? "active" : "")
-                  }
-                  type="button"
-                  onClick={() => {
-                    setActiveView("ps-plus-catalog");
-                    setViewUrl("ps-plus-catalog");
-                  }}
-                >
-                  PS Plus 游戏库
-                </button>
+                {settings.showPsPlusCatalog ? (
+                  <button
+                    className={
+                      "platform-tab catalog-mobile-tab " +
+                      (activeView === "ps-plus-catalog" ? "active" : "")
+                    }
+                    type="button"
+                    onClick={() => {
+                      setActiveView("ps-plus-catalog");
+                      setViewUrl("ps-plus-catalog");
+                    }}
+                  >
+                    PS Plus 游戏库
+                  </button>
+                ) : null}
                 {accessStatus === "unlocked" ? (
                   <div className="flex rounded-xl border border-base-300 bg-base-200 p-1">
                     <button
@@ -2393,13 +2420,11 @@ export default function LedgerClient({
                 {formatCnyTotal(purchaseCnyStats.total, purchaseCnyStats.missingRates)}
               </strong>
               <small>
-                {statsScopeLabel(statsScope)} ·{" "}
+                {statsLibraryLabel} ·{" "}
                 {exchangeRates?.date ? `汇率 ${exchangeRates.date}` : "汇率更新中"}
               </small>
             </div>
-            {configError || exchangeError ? (
-              <p className="sidebar-error">{configError || exchangeError}</p>
-            ) : null}
+            {exchangeError ? <p className="sidebar-error">{exchangeError}</p> : null}
           </section>
           {accessStatus === "unlocked" ? (
             <section className="right-panel-section">

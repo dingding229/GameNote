@@ -38,7 +38,6 @@ features/ledger/        游戏收藏前端业务模块
   types.ts              前端领域类型
   utils.ts              前端业务工具
 lib/auth/               登录、密码与会话能力
-lib/config/             服务端应用配置
 lib/game/               游戏名称规范化与解析
 lib/ledger/             收藏记录结构与 SQLite 仓储
 public/                 静态资源
@@ -56,11 +55,14 @@ git clone https://github.com/dingding229/GameNote.git
 cd GameNote
 ```
 
-编辑 `docker-compose.yml`，修改 JWT 签名密钥：
+复制环境变量模板，并生成独立的 JWT 会话签名密钥：
 
-```yaml
-JWT_SECRET: "请修改为一段足够长的随机字符串"
+```bash
+cp .env.example .env
+openssl rand -base64 48
 ```
+
+将命令输出写入 `.env` 的 `JWT_SECRET`。真实密钥不要提交到 Git；修改密钥会使现有登录会话失效。
 
 启动服务：
 
@@ -90,33 +92,21 @@ services:
       - "3000:3000"
     environment:
       PS_PLUS_CATALOG_REFRESH_HOURS: ${PS_PLUS_CATALOG_REFRESH_HOURS:-12}
-      JWT_SECRET: "请修改为一段足够长的随机字符串"
-      OPENAI_API_KEY: "请填写 OpenAI API Key"
-      OPENAI_VISION_MODEL: "gpt-4.1-mini"
+      JWT_SECRET: ${JWT_SECRET:?请复制 .env.example 为 .env，并配置 JWT_SECRET}
       APP_DATABASE_FILE: "/data/records.sqlite"
-      APP_STATS_PLATFORMS: "all"
     volumes:
       - ./data:/data
 ```
 
 环境变量说明：
 
-| 变量                            | 说明                                     | 默认值                 |
-| ------------------------------- | ---------------------------------------- | ---------------------- |
-| `JWT_SECRET`                    | JWT 会话签名密钥                         | 生产环境必须配置       |
-| `PS_PLUS_CATALOG_REFRESH_HOURS` | PS Plus 完整游戏目录后台刷新间隔（小时） | `12`                   |
-| `OPENAI_API_KEY`                | OpenAI API Key，用于购买截图识别         | 未配置时关闭识别能力   |
-| `OPENAI_VISION_MODEL`           | 支持图像输入的 OpenAI 模型               | `gpt-4.1-mini`         |
-| `APP_DATABASE_FILE`             | SQLite 数据库路径                        | `/data/records.sqlite` |
-| `APP_STATS_PLATFORMS`           | 首页统计范围                             | `all`                  |
+| 变量                            | 说明                                          | 默认值                 |
+| ------------------------------- | --------------------------------------------- | ---------------------- |
+| `JWT_SECRET`                    | 独立随机的 JWT 会话签名密钥，建议至少 32 字节 | 必须在 `.env` 中配置   |
+| `PS_PLUS_CATALOG_REFRESH_HOURS` | PS Plus 完整游戏目录后台刷新间隔（小时）      | `12`                   |
+| `APP_DATABASE_FILE`             | SQLite 数据库路径                             | `/data/records.sqlite` |
 
-`APP_STATS_PLATFORMS` 可选值：
-
-| 值              | 统计范围                      |
-| --------------- | ----------------------------- |
-| `all` 或 `both` | Nintendo Switch + PlayStation |
-| `ns`            | 仅 Nintendo Switch            |
-| `ps`            | 仅 PlayStation                |
+AI API 地址、API Key、视觉模型，以及需要展示的游戏库和工具，均在管理员后台“设置”页面中维护。
 
 修改环境变量后重启容器：
 
@@ -181,7 +171,7 @@ npm run build:docker
 
 ## 安全注意
 
-- 部署前一定要设置足够长且随机的 `JWT_SECRET`；修改后所有现有登录会话会失效。
+- 使用 `openssl rand -base64 48` 为每个部署生成独立的 `JWT_SECRET`，保存在 `.env` 中且不要提交；修改后所有现有登录会话会失效。
 - 不要把 `data/records.sqlite` 提交到 Git。
 - 不建议直接暴露到公网；如果需要公网访问，建议放在反向代理后面，并启用 HTTPS。
 - 官方数据查询依赖 Nintendo、PlayStation 页面结构和接口，官网改版时可能需要更新解析逻辑。
