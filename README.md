@@ -106,6 +106,7 @@ services:
       dockerfile: Dockerfile
     container_name: gamenote
     restart: unless-stopped
+    init: true
     ports:
       - "3000:3000"
     environment:
@@ -167,6 +168,33 @@ docker compose down
 2. 停止容器后复制 `data/records.sqlite`。
 
 JSON 备份可以在设置页面直接导入。SQLite 备份应在容器停止后替换，避免复制写入中的数据库文件。旧版 `records.json` 存在且 SQLite 尚无记录时，应用会尝试自动迁移。
+
+## Debian 12 容器反复重启
+
+旧镜像可能因为 standalone 依赖追踪排除了 Next.js 自身运行库，在日志中出现类似错误后退出：
+
+```text
+Error: Cannot find module '../../lib/picocolors'
+```
+
+当前版本已经移除有问题的追踪排除配置，由 Next.js 自动生成完整 standalone 运行目录，并为镜像增加健康检查。升级时请强制拉取基础镜像并清理旧构建缓存：
+
+```bash
+git pull
+docker compose down --remove-orphans
+docker compose build --pull --no-cache
+docker compose up -d
+docker compose ps
+docker compose logs --tail=100 gamenote
+```
+
+正常状态应显示 `Up ... (healthy)`。如果仍然重启，请先确认 `.env` 中的 `JWT_SECRET` 至少为 32 字节，再把以下命令的完整输出用于排查：
+
+```bash
+docker compose ps
+docker inspect gamenote --format '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}'
+docker compose logs --tail=200 gamenote
+```
 
 ## 本地开发与质量检查
 
