@@ -383,9 +383,6 @@ a:focus-visible,
   color: #969da6;
   font-size: 0.7rem;
 }
-.legacy-mobile-tools {
-  display: contents;
-}
 .visitor-panel p {
   color: #777f89;
   font-size: 0.78rem;
@@ -408,6 +405,18 @@ a:focus-visible,
   align-items: center;
   display: flex;
   gap: 0.75rem;
+}
+.header-primary-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+.desktop-header-avatar {
+  display: contents;
+}
+.mobile-account-menu {
+  display: none;
 }
 .mobile-navigation {
   display: none;
@@ -715,28 +724,6 @@ a:focus-visible,
   background: color-mix(in srgb, var(--color-error) 14%, var(--color-base-100));
 }
 
-.view-tab,
-.platform-tab {
-  border-radius: var(--radius-field);
-  color: color-mix(in srgb, var(--color-base-content) 70%, transparent);
-  font-size: 0.92rem;
-  font-weight: 800;
-  min-height: 2.25rem;
-  min-width: 5.25rem;
-  padding: 0.45rem 0.85rem;
-  transition:
-    background 120ms ease,
-    color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.view-tab.active,
-.platform-tab.active {
-  background: var(--color-primary);
-  color: var(--color-primary-content);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
-}
-
 .display-mode-switch {
   background: var(--color-base-200);
   border: 1px solid var(--color-base-300);
@@ -759,10 +746,6 @@ a:focus-visible,
   background: var(--color-base-100);
   box-shadow: 0 1px 4px color-mix(in srgb, var(--color-base-content) 12%, transparent);
   color: var(--color-primary);
-}
-
-.platform-tab {
-  min-width: 9.6rem;
 }
 
 .image-badge {
@@ -1278,6 +1261,9 @@ a:focus-visible,
   flex: 1;
   max-width: 34rem;
 }
+.catalog-toolbar .catalog-display-field {
+  flex: 0 0 10rem;
+}
 .catalog-actions {
   display: flex;
   gap: 0.6rem;
@@ -1378,6 +1364,22 @@ a:focus-visible,
   line-height: 1rem;
   overflow-wrap: anywhere;
 }
+.catalog-grid.catalog-list {
+  gap: 0.65rem;
+  grid-template-columns: 1fr;
+}
+.catalog-list .catalog-card {
+  grid-template-columns: 6rem minmax(0, 1fr);
+  grid-template-rows: none;
+}
+.catalog-list .catalog-cover {
+  aspect-ratio: 4 / 5;
+  height: 7.5rem;
+}
+.catalog-list .catalog-card-body {
+  align-content: center;
+  padding: 0.8rem 1rem;
+}
 .catalog-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1402,9 +1404,6 @@ a:focus-visible,
 }
 .catalog-error {
   color: var(--color-error);
-}
-.catalog-mobile-tab {
-  width: 100%;
 }
 .catalog-load-more {
   align-items: center;
@@ -1499,22 +1498,25 @@ a:focus-visible,
     gap: 0.65rem;
     margin-top: 1rem;
   }
-  .legacy-mobile-tools {
-    display: none;
-  }
   .app-toolbar-compact {
-    display: block;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    gap: 0.45rem;
     margin-inline: -1rem;
+    max-width: calc(100% + 2rem);
+    overscroll-behavior-x: contain;
     overflow-x: auto;
     padding: 0 1rem 0.25rem;
     scrollbar-width: none;
+    white-space: nowrap;
   }
   .app-toolbar-compact::-webkit-scrollbar {
     display: none;
   }
   .app-toolbar-compact .toolbar-group {
     border: 0;
-    display: inline-block;
+    display: block;
+    flex: none;
     padding: 0;
   }
   .app-toolbar-compact .toolbar-group > p {
@@ -1523,7 +1525,6 @@ a:focus-visible,
   .app-toolbar-compact .toolbar-items {
     display: flex;
     gap: 0.45rem;
-    margin-right: 0.45rem;
   }
   .app-toolbar-compact .toolbar-items button {
     flex: none;
@@ -1531,34 +1532,72 @@ a:focus-visible,
     grid-template-columns: 1.75rem auto auto;
     min-height: 2.5rem;
     padding: 0.35rem 0.6rem;
+    width: auto;
   }
   .app-toolbar-compact .toolbar-icon {
     height: 1.75rem;
     width: 1.75rem;
   }
-  .mobile-platforms {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+  .desktop-header-avatar {
+    display: none;
   }
-  .mobile-platforms .platform-tab {
-    min-width: 0;
+  .mobile-account-menu {
+    display: block;
+    flex: 0 0 auto;
+    position: relative;
   }
-  .mobile-account-dock {
-    align-items: center;
-    background: #ffffff;
+  .mobile-account-trigger {
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    display: block;
+    padding: 0;
+  }
+  .mobile-account-menu.is-open .mobile-account-trigger {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+  }
+  .mobile-account-popover {
+    background: var(--color-base-100);
     border: 1px solid var(--color-base-300);
-    border-radius: 0.55rem;
-    bottom: max(0.75rem, env(safe-area-inset-bottom));
-    box-shadow: 0 10px 28px rgb(0 0 0 / 12%);
-    display: flex;
-    gap: 0.75rem;
-    left: 0.75rem;
-    padding: 0.55rem;
-    position: fixed;
-    z-index: 30;
+    border-radius: var(--radius-field);
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--color-base-content) 14%, transparent);
+    display: grid;
+    gap: 0.25rem;
+    min-width: 11.5rem;
+    padding: 0.45rem;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.55rem);
+    z-index: 50;
   }
-  .mobile-account-dock .theme-color-control {
-    margin: 0;
+  .mobile-account-popover > div {
+    border-bottom: 1px solid var(--color-base-300);
+    display: grid;
+    gap: 0.15rem;
+    margin-bottom: 0.2rem;
+    padding: 0.45rem 0.55rem 0.6rem;
+  }
+  .mobile-account-popover strong {
+    font-size: 0.82rem;
+  }
+  .mobile-account-popover span {
+    color: color-mix(in srgb, var(--color-base-content) 58%, transparent);
+    font-size: 0.7rem;
+  }
+  .mobile-account-popover button {
+    border-radius: calc(var(--radius-field) * 0.75);
+    font-size: 0.82rem;
+    font-weight: 800;
+    min-height: 2.35rem;
+    padding: 0.5rem 0.55rem;
+    text-align: left;
+  }
+  .mobile-account-popover button:hover {
+    background: var(--color-base-200);
+  }
+  .mobile-account-popover .mobile-account-logout {
+    color: var(--color-error);
   }
   .main-filter-panel {
     grid-template-columns: 1fr 1fr;
@@ -1566,9 +1605,6 @@ a:focus-visible,
   }
   .main-filter-panel > :first-child {
     grid-column: 1 / -1;
-  }
-  .ledger-main-column > section {
-    padding-bottom: 5rem;
   }
   .record-results {
     padding: 1rem;
@@ -1589,6 +1625,9 @@ a:focus-visible,
   }
   .catalog-toolbar .field {
     max-width: none;
+  }
+  .catalog-toolbar .catalog-display-field {
+    flex-basis: auto;
   }
   .catalog-summary {
     grid-template-columns: 1fr 1fr;

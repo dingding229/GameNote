@@ -1,5 +1,5 @@
 import { catalogPageSize } from "../constants";
-import type { AccessStatus, PsPlusCatalog, PsPlusCatalogGame } from "../types";
+import type { AccessStatus, PsPlusCatalog, PsPlusCatalogGame, RecordDisplayMode } from "../types";
 
 type PsPlusCatalogPageProps = {
   accessStatus: AccessStatus;
@@ -7,9 +7,11 @@ type PsPlusCatalogPageProps = {
   catalogQuery: string;
   catalogStatus: "idle" | "loading" | "error";
   catalogError: string;
+  displayMode: RecordDisplayMode;
   filteredGames: PsPlusCatalogGame[];
   visibleGames: PsPlusCatalogGame[];
   onQueryChange: (query: string) => void;
+  onDisplayModeChange: (mode: RecordDisplayMode) => void;
   onLoad: (force?: boolean) => void;
   onLoadMore: (increment: number) => void;
 };
@@ -20,9 +22,11 @@ export function PsPlusCatalogPage({
   catalogQuery,
   catalogStatus,
   catalogError,
+  displayMode,
   filteredGames,
   visibleGames,
   onQueryChange,
+  onDisplayModeChange,
   onLoad,
   onLoadMore,
 }: PsPlusCatalogPageProps) {
@@ -37,6 +41,27 @@ export function PsPlusCatalogPage({
             placeholder="名称、PS4、PS5 或会员等级"
           />
         </label>
+        <div className="field catalog-display-field">
+          <span>展示方式</span>
+          <div className="display-mode-switch" role="group" aria-label="PS Plus 展示方式">
+            <button
+              className={displayMode === "grid" ? "active" : ""}
+              type="button"
+              aria-pressed={displayMode === "grid"}
+              onClick={() => onDisplayModeChange("grid")}
+            >
+              网格
+            </button>
+            <button
+              className={displayMode === "list" ? "active" : ""}
+              type="button"
+              aria-pressed={displayMode === "list"}
+              onClick={() => onDisplayModeChange("list")}
+            >
+              列表
+            </button>
+          </div>
+        </div>
         <div className="catalog-actions">
           {accessStatus === "unlocked" ? (
             <button
@@ -89,7 +114,7 @@ export function PsPlusCatalogPage({
       {catalog && !filteredGames.length ? (
         <div className="catalog-message">没有符合搜索条件的游戏</div>
       ) : null}
-      <div className="catalog-grid">
+      <div className={`catalog-grid${displayMode === "list" ? " catalog-list" : ""}`}>
         {visibleGames.map((game) => (
           <article className="catalog-card" key={game.id}>
             <div className="catalog-cover">

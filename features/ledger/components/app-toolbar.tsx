@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import type { ToolbarGroup } from "../types";
 
 export function Stat({ label, value }: { label: string; value: string }) {
@@ -18,6 +21,15 @@ export function AppToolbar({
   groups: ToolbarGroup[];
   compact?: boolean;
 }) {
+  const activeItemRef = useRef<HTMLButtonElement>(null);
+  const activeItemId = groups.flatMap((group) => group.items).find((item) => item.active)?.id;
+
+  useEffect(() => {
+    if (compact && activeItemId) {
+      activeItemRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+  }, [activeItemId, compact]);
+
   return (
     <nav
       className={compact ? "app-toolbar app-toolbar-compact" : "app-toolbar"}
@@ -32,6 +44,7 @@ export function AppToolbar({
                 className={item.active ? "active" : ""}
                 type="button"
                 key={item.id}
+                ref={compact && item.active ? activeItemRef : undefined}
                 onClick={item.onSelect}
                 aria-pressed={item.active}
                 title={item.label}

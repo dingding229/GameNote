@@ -14,6 +14,7 @@ import {
   regions,
 } from "./constants";
 import { MembershipPage, SettingsPage } from "./components/settings-pages";
+import { MobileAccountMenu } from "./components/mobile-account-menu";
 import { PsPlusCatalogPage } from "./components/ps-plus-catalog-page";
 import { useDialogAccessibility } from "./hooks/use-dialog-accessibility";
 import { createFormFromRecognizedGame } from "./recognized-game";
@@ -156,6 +157,7 @@ export default function LedgerClient({
   const [catalogStatus, setCatalogStatus] = useState<"idle" | "loading" | "error">("idle");
   const [catalogError, setCatalogError] = useState("");
   const [catalogVisibleCount, setCatalogVisibleCount] = useState(catalogPageSize);
+  const [catalogDisplayMode, setCatalogDisplayMode] = useState<RecordDisplayMode>("grid");
   const shareDialogRef = useDialogAccessibility(shareOpen, closeSharePanel);
   const recognizeDialogRef = useDialogAccessibility(recognizeOpen, () => setRecognizeOpen(false));
   const authDialogRef = useDialogAccessibility<HTMLFormElement>(authPanelOpen, () =>
@@ -1216,6 +1218,7 @@ export default function LedgerClient({
         ]
       : []),
   ];
+  const mobileToolbarGroups = toolbarGroups.filter((group) => group.id !== "manage");
 
   return (
     <main className="ledger-page min-h-screen text-base-content">
@@ -1252,7 +1255,7 @@ export default function LedgerClient({
 
         <div className="ledger-main-column">
           <header className="ledger-header">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="header-primary-row">
               <div className="min-w-0">
                 <p className="ledger-kicker">
                   {activeView === "ps-plus-catalog"
@@ -1296,109 +1299,31 @@ export default function LedgerClient({
                 {accessStatus === "locked" ? (
                   <span className="readonly-badge">只读浏览</span>
                 ) : null}
-                {settings.avatarUrl ? (
-                  <img className="header-avatar" src={settings.avatarUrl} alt="用户头像" />
-                ) : (
-                  <span className="header-avatar-fallback">
-                    {currentUsername?.[0]?.toUpperCase() || "G"}
-                  </span>
-                )}
+                <div className="desktop-header-avatar" aria-hidden="true">
+                  {settings.avatarUrl ? (
+                    <img className="header-avatar" src={settings.avatarUrl} alt="" />
+                  ) : (
+                    <span className="header-avatar-fallback">
+                      {currentUsername?.[0]?.toUpperCase() || "G"}
+                    </span>
+                  )}
+                </div>
+                <MobileAccountMenu
+                  avatarUrl={settings.avatarUrl}
+                  authenticated={accessStatus === "unlocked"}
+                  registrationOpen={registrationOpen}
+                  username={currentUsername}
+                  onLogin={() => setAuthPanelOpen(true)}
+                  onLogout={lockLedger}
+                  onSettings={() => switchView("settings")}
+                />
               </div>
             </div>
             {storageError ? (
               <p className="alert alert-warning mt-3 py-2 text-sm font-semibold">{storageError}</p>
             ) : null}
             <div className="mobile-navigation">
-              <AppToolbar groups={toolbarGroups} compact />
-              <div className="legacy-mobile-tools">
-                <div className="mobile-platforms">
-                  {gamePlatforms
-                    .filter((platform) =>
-                      platform === "Nintendo Switch"
-                        ? settings.showNintendoSwitch
-                        : settings.showPlayStation,
-                    )
-                    .map((platform) => (
-                      <button
-                        key={platform}
-                        className={`platform-tab ${
-                          activeView === "records" && activePlatform === platform ? "active" : ""
-                        }`}
-                        aria-pressed={activePlatform === platform}
-                        type="button"
-                        onClick={() => switchPlatformPage(platform)}
-                      >
-                        {platform === "PlayStation"
-                          ? `PlayStation ${playStationCount}`
-                          : `Nintendo Switch ${switchCount}`}
-                      </button>
-                    ))}
-                </div>
-                {settings.showPsPlusCatalog ? (
-                  <button
-                    className={
-                      "platform-tab catalog-mobile-tab " +
-                      (activeView === "ps-plus-catalog" ? "active" : "")
-                    }
-                    type="button"
-                    onClick={() => {
-                      setActiveView("ps-plus-catalog");
-                      setViewUrl("ps-plus-catalog");
-                    }}
-                  >
-                    PS Plus 游戏库
-                  </button>
-                ) : null}
-                {accessStatus === "unlocked" ? (
-                  <div className="flex rounded-xl border border-base-300 bg-base-200 p-1">
-                    <button
-                      className={`view-tab ${activeView === "records" ? "active" : ""}`}
-                      aria-pressed={activeView === "records"}
-                      type="button"
-                      onClick={() => setActiveView("records")}
-                    >
-                      记录
-                    </button>
-                    <button
-                      className={`view-tab ${activeView === "form" ? "active" : ""}`}
-                      aria-pressed={activeView === "form"}
-                      type="button"
-                      onClick={() => {
-                        if (!editingId) {
-                          resetForm();
-                        }
-                        setActiveView("form");
-                      }}
-                    >
-                      {editingId ? "编辑" : "新增"}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              <div className="mobile-account-dock">
-                {accessStatus === "unlocked" ? (
-                  <>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => setActiveView("settings")}
-                    >
-                      设置
-                    </button>
-                    <button className="ghost-button" type="button" onClick={lockLedger}>
-                      退出登录
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => setAuthPanelOpen(true)}
-                  >
-                    {registrationOpen ? "注册管理员" : "管理员登录"}
-                  </button>
-                )}
-              </div>
+              <AppToolbar groups={mobileToolbarGroups} compact />
             </div>
           </header>
 
@@ -1769,9 +1694,11 @@ export default function LedgerClient({
                   catalogQuery={catalogQuery}
                   catalogStatus={catalogStatus}
                   catalogError={catalogError}
+                  displayMode={catalogDisplayMode}
                   filteredGames={filteredCatalogGames}
                   visibleGames={visibleCatalogGames}
                   onQueryChange={setCatalogQuery}
+                  onDisplayModeChange={setCatalogDisplayMode}
                   onLoad={loadPsPlusCatalog}
                   onLoadMore={(increment) => setCatalogVisibleCount((count) => count + increment)}
                 />
