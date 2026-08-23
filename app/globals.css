@@ -1124,22 +1124,39 @@ a:focus-visible,
   border-radius: var(--radius-field);
   display: grid;
   gap: 0.7rem;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 0.9rem;
 }
-.recognized-game-select {
-  grid-column: span 3;
+.recognized-game-summary {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
 }
-.recognized-confidence {
-  align-self: center;
-  color: var(--color-primary);
+.recognized-game-summary > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.recognized-game-summary strong {
+  overflow-wrap: anywhere;
+}
+.recognized-game-summary span,
+.recognized-game-meta span {
+  color: color-mix(in srgb, var(--color-base-content) 62%, transparent);
   font-size: 0.78rem;
-  font-weight: 800;
-  text-align: right;
 }
-.recognized-title,
-.recognized-warning {
-  grid-column: 1 / -1;
+.recognized-game-summary > span {
+  color: var(--color-primary);
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+.recognized-game-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+}
+.recognized-game-action {
+  justify-self: end;
 }
 .recognized-warning {
   background: color-mix(in srgb, var(--color-warning) 15%, var(--color-base-100));
@@ -1250,56 +1267,6 @@ a:focus-visible,
   overflow-x: hidden;
   padding: 1.5rem clamp(1.25rem, 2.5vw, 2.5rem) clamp(1.25rem, 2.5vw, 2.5rem);
   width: 100%;
-}
-.recognized-official {
-  align-items: center;
-  background: var(--color-base-100);
-  border: 1px solid var(--color-base-300);
-  border-radius: var(--radius-field);
-  display: flex;
-  gap: 0.75rem;
-  grid-column: 1 / -1;
-  min-width: 0;
-  padding: 0.65rem;
-}
-.recognized-official > img,
-.recognized-cover-placeholder {
-  border-radius: calc(var(--radius-field) * 0.75);
-  flex: 0 0 3.5rem;
-  height: 4.5rem;
-  object-fit: cover;
-  width: 3.5rem;
-}
-.recognized-cover-placeholder {
-  align-items: center;
-  background: var(--color-base-200);
-  color: color-mix(in srgb, var(--color-base-content) 52%, transparent);
-  display: flex;
-  font-size: 0.68rem;
-  justify-content: center;
-  text-align: center;
-}
-.recognized-official > div:last-child {
-  display: grid;
-  gap: 0.25rem;
-  min-width: 0;
-}
-.recognized-official strong {
-  font-size: 0.82rem;
-}
-.recognized-official a,
-.recognized-official span {
-  color: color-mix(in srgb, var(--color-base-content) 62%, transparent);
-  font-size: 0.75rem;
-}
-.recognized-official a {
-  color: var(--color-primary);
-  font-weight: 700;
-  text-decoration: none;
-}
-.recognized-official a:hover {
-  text-decoration: underline;
-  text-underline-offset: 0.16rem;
 }
 .catalog-toolbar {
   align-items: end;
@@ -1462,12 +1429,6 @@ a:focus-visible,
 }
 
 @media (max-width: 900px) {
-  .recognized-game {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .recognized-game-select {
-    grid-column: span 1;
-  }
   .record-list-row {
     align-items: start;
     grid-template-columns: 5.5rem minmax(0, 1fr);
@@ -1667,13 +1628,13 @@ a:focus-visible,
   .main-filter-panel > :first-child {
     grid-column: 1;
   }
-  .recognized-game {
-    grid-template-columns: 1fr;
+  .recognized-game-summary {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.35rem;
   }
-  .recognized-game-select,
-  .recognized-title,
-  .recognized-warning {
-    grid-column: 1;
+  .recognized-game-action {
+    justify-self: stretch;
   }
   .record-list-row {
     gap: 0.7rem;

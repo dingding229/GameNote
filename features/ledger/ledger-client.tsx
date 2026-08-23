@@ -16,7 +16,7 @@ import {
 import { MembershipPage, SettingsPage } from "./components/settings-pages";
 import { PsPlusCatalogPage } from "./components/ps-plus-catalog-page";
 import { useDialogAccessibility } from "./hooks/use-dialog-accessibility";
-import { enrichRecognizedGameWithOfficialData } from "./official-game-lookup";
+import { createFormFromRecognizedGame } from "./recognized-game";
 import {
   fetchLedgerFromServer,
   loadLegacyLocalRecords,
@@ -84,6 +84,7 @@ export default function LedgerClient({
   const saveRequestRef = useRef(0);
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
   const ledgerUpdatedAtRef = useRef("");
+  const coverLookupRequestRef = useRef(0);
   const [records, setRecords] = useState<GameRecord[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -103,6 +104,7 @@ export default function LedgerClient({
   const [recognizeOpen, setRecognizeOpen] = useState(false);
   const [recognizeFiles, setRecognizeFiles] = useState<File[]>([]);
   const [recognizedGames, setRecognizedGames] = useState<RecognizedGame[]>([]);
+  const [resumeRecognitionAfterSave, setResumeRecognitionAfterSave] = useState(false);
   const [recognizeStatus, setRecognizeStatus] = useState<"idle" | "recognizing" | "error">("idle");
   const [recognizeError, setRecognizeError] = useState("");
   const [activePlatform, setActivePlatform] = useState<GamePlatform>(initialPlatform);
@@ -718,14 +720,22 @@ export default function LedgerClient({
   );
 
   function updateForm<Key extends keyof FormState>(key: Key, value: FormState[Key]) {
+    if (key === "title" || key === "officialUrl") {
+      coverLookupRequestRef.current += 1;
+      setCoverResults([]);
+      setCoverError("");
+      setCoverStatus("idle");
+    }
     setForm((current) => ({ ...current, [key]: value }));
   }
 
   function resetForm() {
+    coverLookupRequestRef.current += 1;
     setEditingId(null);
     setForm(createEmptyForm(activePlatform));
     setCoverResults([]);
     setCoverError("");
+    setCoverStatus("idle");
   }
 
   function switchPlatformPage(platform: GamePlatform) {
@@ -744,7 +754,10 @@ export default function LedgerClient({
       setViewUrl(view);
       return;
     }
-    if (view === "form") resetForm();
+    if (view === "form") {
+      setResumeRecognitionAfterSave(false);
+      resetForm();
+    }
     setActiveView(view);
   }
 
@@ -788,9 +801,17 @@ export default function LedgerClient({
     setActiveView("records");
 
     resetForm();
+    if (resumeRecognitionAfterSave && recognizedGames.length) {
+      setRecognizeOpen(true);
+    } else {
+      setRecognizeFiles([]);
+      setRecognizedGames([]);
+    }
+    setResumeRecognitionAfterSave(false);
   }
 
   function editRecord(record: GameRecord) {
+    setResumeRecognitionAfterSave(false);
     setEditingId(record.id);
     setPlatformUrl(record.platform, "replace");
     setActivePlatform(record.platform);
@@ -825,6 +846,8 @@ export default function LedgerClient({
   }
 
   function updatePlatform(platform: GamePlatform) {
+    coverLookupRequestRef.current += 1;
+    setCoverStatus("idle");
     setPlatformUrl(platform, "replace");
     setActivePlatform(platform);
     setCoverResults([]);
@@ -944,23 +967,17 @@ export default function LedgerClient({
     try {
       const response = await fetch("/api/recognize-purchase", { method: "POST", body });
       const payload = (await response.json().catch(() => ({}))) as {
-        games?: Omit<
-          RecognizedGame,
-          "selected" | "coverUrl" | "officialUrl" | "officialLookupStatus"
-        >[];
+        games?: RecognizedGame[];
         error?: string;
       };
       if (!response.ok) throw new Error(payload.error || "图片识别失败");
-      const recognized = (payload.games || []).map((game) => ({
-        ...game,
-        purchaseDate: game.purchaseDate || todayString(),
-        format: normalizeFormatForPlatform(game.format, game.platform),
-        selected: true,
-      }));
-      const enriched = await Promise.all(
-        recognized.map((game) => enrichRecognizedGameWithOfficialData(game)),
+      setRecognizedGames(
+        (payload.games || []).map((game) => ({
+          ...game,
+          purchaseDate: game.purchaseDate || todayString(),
+          format: normalizeFormatForPlatform(game.format, game.platform),
+        })),
       );
-      setRecognizedGames(enriched);
       if (!payload.games?.length) setRecognizeError("没有识别到已购买的游戏");
       setRecognizeStatus("idle");
     } catch (error) {
@@ -969,46 +986,22 @@ export default function LedgerClient({
     }
   }
 
-  function updateRecognizedGame<Key extends keyof RecognizedGame>(
-    index: number,
-    key: Key,
-    value: RecognizedGame[Key],
-  ) {
-    setRecognizedGames((current) =>
-      current.map((game, gameIndex) => (gameIndex === index ? { ...game, [key]: value } : game)),
-    );
-  }
+  function openRecognizedGameInForm(game: RecognizedGame, index: number) {
+    const remainingGames = recognizedGames.filter((_, gameIndex) => gameIndex !== index);
+    const nextForm = createFormFromRecognizedGame(game, todayString());
 
-  function addRecognizedGames() {
-    const additions = recognizedGames
-      .filter((game) => game.selected && game.title.trim())
-      .map(
-        (game) =>
-          ({
-            id: createId(),
-            platform: game.platform,
-            title: game.title.trim(),
-            price: Number(game.price) || 0,
-            currency: game.currency,
-            purchaseDate: game.purchaseDate || todayString(),
-            region: game.region,
-            format: normalizeFormatForPlatform(game.format, game.platform),
-            seller: game.seller.trim(),
-            coverUrl: game.coverUrl,
-            officialUrl: game.officialUrl,
-            notes: game.notes.trim(),
-            soldDate: "",
-            soldPrice: 0,
-            soldCurrency: game.currency,
-          }) satisfies GameRecord,
-      );
-    if (!additions.length) return;
-    setRecords((current) => [...additions, ...current]);
-    setRecordsDirty(true);
-    setSaveStatus("saving");
+    setEditingId(null);
+    setPlatformUrl(game.platform, "replace");
+    setActivePlatform(game.platform);
+    setForm(nextForm);
+    setCoverResults([]);
+    setCoverError("");
+    setRecognizedGames(remainingGames);
+    setResumeRecognitionAfterSave(remainingGames.length > 0);
     setRecognizeOpen(false);
-    setRecognizeFiles([]);
-    setRecognizedGames([]);
+    if (!remainingGames.length) setRecognizeFiles([]);
+    setActiveView("form");
+    void lookupOfficialGame("title", nextForm);
   }
 
   function importRecordsClick() {
@@ -1056,12 +1049,15 @@ export default function LedgerClient({
     }
   }
 
-  async function lookupOfficialGame(mode: "title" | "url") {
+  async function lookupOfficialGame(
+    mode: "title" | "url",
+    source: Pick<FormState, "title" | "officialUrl" | "platform"> = form,
+  ) {
     const params = new URLSearchParams();
-    const searchTerm = form.title.trim();
-    const officialUrl = form.officialUrl.trim();
+    const searchTerm = source.title.trim();
+    const officialUrl = source.officialUrl.trim();
     const endpoint =
-      form.platform === "PlayStation" ? "/api/playstation-game" : "/api/nintendo-cover";
+      source.platform === "PlayStation" ? "/api/playstation-game" : "/api/nintendo-cover";
 
     if (mode === "title") {
       if (!searchTerm) {
@@ -1072,13 +1068,14 @@ export default function LedgerClient({
       params.set("q", searchTerm);
     } else {
       if (!officialUrl) {
-        setCoverError(`先填写${officialUrlLabel(form.platform)}`);
+        setCoverError(`先填写${officialUrlLabel(source.platform)}`);
         return;
       }
 
       params.set("url", officialUrl);
     }
 
+    const requestId = ++coverLookupRequestRef.current;
     setCoverStatus("searching");
     setCoverError("");
 
@@ -1092,6 +1089,7 @@ export default function LedgerClient({
       if (!response.ok) {
         throw new Error(payload.error || "封面查询失败");
       }
+      if (requestId !== coverLookupRequestRef.current) return;
 
       const results = payload.results ?? [];
       setCoverResults(results);
@@ -1100,10 +1098,11 @@ export default function LedgerClient({
         setCoverError("未找到官方数据");
       }
     } catch (error) {
+      if (requestId !== coverLookupRequestRef.current) return;
       setCoverResults([]);
       setCoverError(error instanceof Error ? error.message : "官方数据查询失败");
     } finally {
-      setCoverStatus("idle");
+      if (requestId === coverLookupRequestRef.current) setCoverStatus("idle");
     }
   }
 
@@ -1425,7 +1424,10 @@ export default function LedgerClient({
                       <button
                         type="button"
                         className="ghost-button"
-                        onClick={() => setActiveView("records")}
+                        onClick={() => {
+                          setResumeRecognitionAfterSave(false);
+                          setActiveView("records");
+                        }}
                       >
                         返回记录
                       </button>
@@ -2187,9 +2189,7 @@ export default function LedgerClient({
                             disabled={!recognizeFiles.length || recognizeStatus === "recognizing"}
                             onClick={recognizePurchaseImages}
                           >
-                            {recognizeStatus === "recognizing"
-                              ? "正在识别并获取官网信息"
-                              : "开始识别"}
+                            {recognizeStatus === "recognizing" ? "AI 识别中" : "开始识别"}
                           </button>
                         ) : null}
                         {recognizeError ? (
@@ -2202,168 +2202,32 @@ export default function LedgerClient({
                           <div className="recognized-games">
                             {recognizedGames.map((game, index) => (
                               <article className="recognized-game" key={index}>
-                                <label className="checkbox-field recognized-game-select">
-                                  <input
-                                    type="checkbox"
-                                    checked={game.selected}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(index, "selected", event.target.checked)
-                                    }
-                                  />
-                                  <span>加入记录</span>
-                                </label>
-                                <div className="recognized-confidence">
-                                  置信度 {Math.round(game.confidence * 100)}%
-                                </div>
-                                <div className="recognized-official">
-                                  {game.coverUrl ? (
-                                    <img src={game.coverUrl} alt={`${game.title} 官方封面`} />
-                                  ) : (
-                                    <div className="recognized-cover-placeholder">暂无封面</div>
-                                  )}
+                                <div className="recognized-game-summary">
                                   <div>
-                                    <strong>
-                                      {game.officialLookupStatus === "found"
-                                        ? "已匹配官网信息"
-                                        : "未找到官网匹配"}
-                                    </strong>
-                                    {game.officialUrl ? (
-                                      <a href={game.officialUrl} target="_blank" rel="noreferrer">
-                                        查看游戏官网
-                                      </a>
-                                    ) : (
-                                      <span>将使用图片识别结果，添加后可手动补充</span>
-                                    )}
+                                    <strong>{game.title}</strong>
+                                    <span>
+                                      {game.platform} · {game.region} · {game.format}
+                                    </span>
                                   </div>
+                                  <span>置信度 {Math.round(game.confidence * 100)}%</span>
                                 </div>
-                                <label className="field recognized-title">
-                                  <span>游戏名称</span>
-                                  <input
-                                    value={game.title}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(index, "title", event.target.value)
-                                    }
-                                  />
-                                </label>
-                                <label className="field">
-                                  <span>平台</span>
-                                  <select
-                                    value={game.platform}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(
-                                        index,
-                                        "platform",
-                                        event.target.value as GamePlatform,
-                                      )
-                                    }
-                                  >
-                                    {gamePlatforms.map((value) => (
-                                      <option key={value}>{value}</option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <label className="field">
-                                  <span>购买价格</span>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={game.price}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(
-                                        index,
-                                        "price",
-                                        Number(event.target.value),
-                                      )
-                                    }
-                                  />
-                                </label>
-                                <label className="field">
-                                  <span>币种</span>
-                                  <select
-                                    value={game.currency}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(
-                                        index,
-                                        "currency",
-                                        event.target.value as Currency,
-                                      )
-                                    }
-                                  >
-                                    {currencies.map((value) => (
-                                      <option key={value}>{value}</option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <label className="field">
-                                  <span>版本</span>
-                                  <select
-                                    value={game.region}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(
-                                        index,
-                                        "region",
-                                        event.target.value as Region,
-                                      )
-                                    }
-                                  >
-                                    {regions.map((value) => (
-                                      <option key={value}>{value}</option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <label className="field">
-                                  <span>形态</span>
-                                  <select
-                                    value={game.format}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(
-                                        index,
-                                        "format",
-                                        event.target.value as GameFormat,
-                                      )
-                                    }
-                                  >
-                                    {formatOptionsForPlatform(game.platform).map((value) => (
-                                      <option key={value}>{value}</option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <label className="field">
-                                  <span>购买平台 / 店铺</span>
-                                  <input
-                                    value={game.seller}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(index, "seller", event.target.value)
-                                    }
-                                  />
-                                </label>
-                                <label className="field">
-                                  <span>购买日期</span>
-                                  <input
-                                    type="date"
-                                    value={game.purchaseDate}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(
-                                        index,
-                                        "purchaseDate",
-                                        event.target.value,
-                                      )
-                                    }
-                                  />
-                                </label>
-                                <label className="field recognized-title">
-                                  <span>备注</span>
-                                  <input
-                                    value={game.notes}
-                                    onChange={(event) =>
-                                      updateRecognizedGame(index, "notes", event.target.value)
-                                    }
-                                  />
-                                </label>
+                                <div className="recognized-game-meta">
+                                  <span>
+                                    {game.currency} {game.price}
+                                  </span>
+                                  <span>{game.purchaseDate || "未识别购买日期"}</span>
+                                  <span>{game.seller || "未识别购买平台 / 店铺"}</span>
+                                </div>
                                 {game.warning ? (
                                   <p className="recognized-warning">请核实：{game.warning}</p>
                                 ) : null}
+                                <button
+                                  className="primary-button recognized-game-action"
+                                  type="button"
+                                  onClick={() => openRecognizedGameInForm(game, index)}
+                                >
+                                  在新增游戏中编辑并匹配官网
+                                </button>
                               </article>
                             ))}
                             <div className="share-dialog-actions">
@@ -2373,13 +2237,6 @@ export default function LedgerClient({
                                 onClick={recognizePurchaseImages}
                               >
                                 重新识别
-                              </button>
-                              <button
-                                className="primary-button"
-                                type="button"
-                                onClick={addRecognizedGames}
-                              >
-                                添加所选记录
                               </button>
                             </div>
                           </div>

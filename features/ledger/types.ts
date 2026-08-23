@@ -46,10 +46,6 @@ export type RecognizedGame = {
   notes: string;
   confidence: number;
   warning: string;
-  coverUrl: string;
-  officialUrl: string;
-  officialLookupStatus: "found" | "not-found";
-  selected: boolean;
 };
 
 export type SettingsState = {
