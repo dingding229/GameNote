@@ -16,6 +16,7 @@ import {
 import { MembershipPage, SettingsPage } from "./components/settings-pages";
 import { PsPlusCatalogPage } from "./components/ps-plus-catalog-page";
 import { useDialogAccessibility } from "./hooks/use-dialog-accessibility";
+import { enrichRecognizedGameWithOfficialData } from "./official-game-lookup";
 import {
   fetchLedgerFromServer,
   loadLegacyLocalRecords,
@@ -943,18 +944,23 @@ export default function LedgerClient({
     try {
       const response = await fetch("/api/recognize-purchase", { method: "POST", body });
       const payload = (await response.json().catch(() => ({}))) as {
-        games?: Omit<RecognizedGame, "selected">[];
+        games?: Omit<
+          RecognizedGame,
+          "selected" | "coverUrl" | "officialUrl" | "officialLookupStatus"
+        >[];
         error?: string;
       };
       if (!response.ok) throw new Error(payload.error || "图片识别失败");
-      setRecognizedGames(
-        (payload.games || []).map((game) => ({
-          ...game,
-          purchaseDate: game.purchaseDate || todayString(),
-          format: normalizeFormatForPlatform(game.format, game.platform),
-          selected: true,
-        })),
+      const recognized = (payload.games || []).map((game) => ({
+        ...game,
+        purchaseDate: game.purchaseDate || todayString(),
+        format: normalizeFormatForPlatform(game.format, game.platform),
+        selected: true,
+      }));
+      const enriched = await Promise.all(
+        recognized.map((game) => enrichRecognizedGameWithOfficialData(game)),
       );
+      setRecognizedGames(enriched);
       if (!payload.games?.length) setRecognizeError("没有识别到已购买的游戏");
       setRecognizeStatus("idle");
     } catch (error) {
@@ -988,8 +994,8 @@ export default function LedgerClient({
             region: game.region,
             format: normalizeFormatForPlatform(game.format, game.platform),
             seller: game.seller.trim(),
-            coverUrl: "",
-            officialUrl: "",
+            coverUrl: game.coverUrl,
+            officialUrl: game.officialUrl,
             notes: game.notes.trim(),
             soldDate: "",
             soldPrice: 0,
@@ -2181,7 +2187,9 @@ export default function LedgerClient({
                             disabled={!recognizeFiles.length || recognizeStatus === "recognizing"}
                             onClick={recognizePurchaseImages}
                           >
-                            {recognizeStatus === "recognizing" ? "AI 识别中" : "开始识别"}
+                            {recognizeStatus === "recognizing"
+                              ? "正在识别并获取官网信息"
+                              : "开始识别"}
                           </button>
                         ) : null}
                         {recognizeError ? (
@@ -2206,6 +2214,27 @@ export default function LedgerClient({
                                 </label>
                                 <div className="recognized-confidence">
                                   置信度 {Math.round(game.confidence * 100)}%
+                                </div>
+                                <div className="recognized-official">
+                                  {game.coverUrl ? (
+                                    <img src={game.coverUrl} alt={`${game.title} 官方封面`} />
+                                  ) : (
+                                    <div className="recognized-cover-placeholder">暂无封面</div>
+                                  )}
+                                  <div>
+                                    <strong>
+                                      {game.officialLookupStatus === "found"
+                                        ? "已匹配官网信息"
+                                        : "未找到官网匹配"}
+                                    </strong>
+                                    {game.officialUrl ? (
+                                      <a href={game.officialUrl} target="_blank" rel="noreferrer">
+                                        查看游戏官网
+                                      </a>
+                                    ) : (
+                                      <span>将使用图片识别结果，添加后可手动补充</span>
+                                    )}
+                                  </div>
                                 </div>
                                 <label className="field recognized-title">
                                   <span>游戏名称</span>

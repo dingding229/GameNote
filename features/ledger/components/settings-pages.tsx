@@ -1,5 +1,6 @@
 import type { ChangeEvent, Dispatch, FormEvent, RefObject, SetStateAction } from "react";
 import type { SettingsState } from "../types";
+import { ModelCombobox } from "./model-combobox";
 
 type SettingsUpdater = Dispatch<SetStateAction<SettingsState>>;
 
@@ -168,21 +169,14 @@ export function SettingsPage({
               }
             />
           </label>
-          <label className="field">
-            <span>视觉模型</span>
-            <input
-              list="ai-model-options"
+          <div className="field">
+            <label htmlFor="ai-vision-model">视觉模型</label>
+            <ModelCombobox
+              models={aiModels}
               value={settings.aiModel}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, aiModel: event.target.value }))
-              }
+              onChange={(aiModel) => setSettings((current) => ({ ...current, aiModel }))}
             />
-            <datalist id="ai-model-options">
-              {aiModels.map((model) => (
-                <option value={model} key={model} />
-              ))}
-            </datalist>
-          </label>
+          </div>
           <label className="field settings-wide">
             <span>API Key {settings.aiApiKeyConfigured ? "（已配置，留空保持）" : ""}</span>
             <input

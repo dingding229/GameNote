@@ -176,9 +176,49 @@ async function searchPlayStationHongKong(query: string): Promise<PlayStationLook
     }
   }
 
-  return dedupeResults(results)
-    .slice(0, 12)
-    .map((result) => withChineseDisplayTitle(result, resolvedTitles));
+  const localizedResults = dedupeResults(results).map((result) =>
+    withChineseDisplayTitle(result, resolvedTitles),
+  );
+
+  return rankPlayStationResults(localizedResults, query, resolvedTitles).slice(0, 12);
+}
+
+function rankPlayStationResults(
+  results: PlayStationLookupResult[],
+  query: string,
+  resolvedTitles: ResolvedGameTitle[],
+) {
+  const aliases = [
+    query,
+    ...resolvedTitles.flatMap((title) => [title.englishTitle, title.chineseTitle]),
+  ]
+    .map(comparableCatalogTitle)
+    .filter(Boolean);
+
+  return [...results].sort(
+    (left, right) => officialResultScore(right, aliases) - officialResultScore(left, aliases),
+  );
+}
+
+function officialResultScore(result: PlayStationLookupResult, aliases: string[]) {
+  const titles = [result.title, result.displayTitle || ""]
+    .map(comparableCatalogTitle)
+    .filter(Boolean);
+  let score = 0;
+
+  for (const title of titles) {
+    for (const alias of aliases) {
+      if (title === alias) score = Math.max(score, 200);
+      else if (title.startsWith(alias) || alias.startsWith(title)) score = Math.max(score, 120);
+      else if (title.includes(alias) || alias.includes(title)) score = Math.max(score, 70);
+    }
+  }
+
+  if (/正式版游戏|full game/i.test(result.platform)) score += 25;
+  if (/体验版|试玩|demo|追加内容|add-on|升级/i.test(`${result.title} ${result.platform}`))
+    score -= 90;
+  const shortestTitleLength = Math.min(...titles.map((title) => title.length));
+  return score - shortestTitleLength / 100;
 }
 
 async function searchPlayStationHongKongVariant(query: string): Promise<PlayStationLookupResult[]> {
