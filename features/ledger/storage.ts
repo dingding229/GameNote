@@ -21,6 +21,7 @@ import {
   normalizeFormatForPlatform,
   physicalFormatForPlatform,
 } from "./utils";
+import { ledgerLimits, limitText, validLedgerNumber } from "@/lib/ledger/limits";
 
 export function normalizeImportedRecord(value: unknown): GameRecord | null {
   if (!value || typeof value !== "object") return null;
@@ -61,10 +62,10 @@ export function normalizeImportedRecord(value: unknown): GameRecord | null {
           ? record.playstationUrl
           : "";
   return {
-    id: typeof record.id === "string" ? record.id : createId(),
+    id: limitText(record.id, ledgerLimits.id) || createId(),
     platform,
-    title: record.title.trim(),
-    price: Number(record.price) || 0,
+    title: limitText(record.title, ledgerLimits.title),
+    price: validLedgerNumber(record.price),
     currency,
     purchaseDate:
       typeof record.purchaseDate === "string" && record.purchaseDate
@@ -72,12 +73,12 @@ export function normalizeImportedRecord(value: unknown): GameRecord | null {
         : new Date().toISOString().slice(0, 10),
     region,
     format,
-    seller: isPhysicalFormat(format) && typeof record.seller === "string" ? record.seller : "",
-    coverUrl: typeof record.coverUrl === "string" ? record.coverUrl : "",
-    officialUrl,
-    notes: typeof record.notes === "string" ? record.notes : "",
+    seller: isPhysicalFormat(format) ? limitText(record.seller, ledgerLimits.seller) : "",
+    coverUrl: limitText(record.coverUrl, ledgerLimits.url),
+    officialUrl: limitText(officialUrl, ledgerLimits.url),
+    notes: limitText(record.notes, ledgerLimits.notes),
     soldDate,
-    soldPrice: soldDate ? Number(record.soldPrice) || 0 : 0,
+    soldPrice: soldDate ? validLedgerNumber(record.soldPrice) : 0,
     soldCurrency,
   };
 }
@@ -106,15 +107,19 @@ export async function fetchLedgerFromServer(): Promise<LedgerDocument> {
   };
 }
 
-export async function saveLedgerToServer(records: GameRecord[]) {
+export async function saveLedgerToServer(records: GameRecord[], updatedAt: string) {
   const response = await fetch("/api/records", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ records }),
+    body: JSON.stringify({ records, updatedAt }),
   });
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  const payload = (await response.json().catch(() => ({}))) as Partial<LedgerDocument> & {
+    error?: string;
+  };
   if (!response.ok)
     throw new Error(payload.error || `保存服务端记录失败（HTTP ${response.status}）`);
+  if (typeof payload.updatedAt !== "string") throw new Error("服务端未返回新的数据版本");
+  return payload.updatedAt;
 }
 
 export function readCachedExchangeRates() {

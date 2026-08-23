@@ -1,10 +1,13 @@
 import { createEmptyLedger, type LedgerDocument, normalizeLedgerDocument } from "./schema";
+import { defaultThemeColor, isAccessibleThemeColor } from "@/lib/ui/theme-color";
 
 export type StatementSync = {
   get(...values: unknown[]): unknown;
   run(...values: unknown[]): unknown;
   all?(...values: unknown[]): unknown[];
 };
+
+type StatementRunResult = { changes?: number | bigint };
 
 export type DatabaseSync = {
   close(): void;
@@ -56,26 +59,47 @@ export async function readLedgerFromSqlite(): Promise<LedgerDocument> {
   }
 }
 
-export async function writeLedgerToSqlite(document: LedgerDocument) {
+export class LedgerConflictError extends Error {
+  constructor() {
+    super("LEDGER_CONFLICT");
+    this.name = "LedgerConflictError";
+  }
+}
+
+export async function writeLedgerToSqlite(document: LedgerDocument, expectedUpdatedAt?: string) {
   const { db } = await openLedgerDatabase();
 
   try {
     ensureLedgerTable(db);
-    writeLedgerToOpenSqlite(db, document);
+    if (!writeLedgerToOpenSqlite(db, document, expectedUpdatedAt)) throw new LedgerConflictError();
   } finally {
     db.close();
   }
 }
 
-export type AppUser = { id: string; username: string; passwordHash: string };
+export type AppUser = {
+  id: string;
+  username: string;
+  passwordHash: string;
+  sessionVersion: number;
+};
 
 export async function getRegisteredUser(): Promise<AppUser | null> {
   const { db } = await openLedgerDatabase();
   try {
     ensureUserTable(db);
     const row = db
-      .prepare("SELECT id, username, password_hash FROM app_users ORDER BY created_at LIMIT 1")
-      .get() as { id?: unknown; username?: unknown; password_hash?: unknown } | undefined;
+      .prepare(
+        "SELECT id, username, password_hash, session_version FROM app_users ORDER BY created_at LIMIT 1",
+      )
+      .get() as
+      | {
+          id?: unknown;
+          username?: unknown;
+          password_hash?: unknown;
+          session_version?: unknown;
+        }
+      | undefined;
     if (
       !row ||
       typeof row.id !== "string" ||
@@ -83,7 +107,15 @@ export async function getRegisteredUser(): Promise<AppUser | null> {
       typeof row.password_hash !== "string"
     )
       return null;
-    return { id: row.id, username: row.username, passwordHash: row.password_hash };
+    return {
+      id: row.id,
+      username: row.username,
+      passwordHash: row.password_hash,
+      sessionVersion:
+        typeof row.session_version === "number" && Number.isInteger(row.session_version)
+          ? row.session_version
+          : 1,
+    };
   } finally {
     db.close();
   }
@@ -95,8 +127,8 @@ export async function createRegisteredUser(user: AppUser) {
     ensureUserTable(db);
     if (db.prepare("SELECT id FROM app_users LIMIT 1").get()) throw new Error("OWNER_EXISTS");
     db.prepare(
-      "INSERT INTO app_users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
-    ).run(user.id, user.username, user.passwordHash, new Date().toISOString());
+      "INSERT INTO app_users (id, username, password_hash, session_version, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(user.id, user.username, user.passwordHash, user.sessionVersion, new Date().toISOString());
   } finally {
     db.close();
   }
@@ -106,7 +138,9 @@ export async function updateRegisteredUserPassword(passwordHash: string) {
   const { db } = await openLedgerDatabase();
   try {
     ensureUserTable(db);
-    db.prepare("UPDATE app_users SET password_hash = ? WHERE id = ?").run(passwordHash, "owner");
+    db.prepare(
+      "UPDATE app_users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?",
+    ).run(passwordHash, "owner");
   } finally {
     db.close();
   }
@@ -211,9 +245,22 @@ function ensureUserTable(db: DatabaseSync) {
       id TEXT PRIMARY KEY NOT NULL,
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
+      session_version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
     )`,
   ).run();
+  const columns = db.prepare("PRAGMA table_info(app_users)").all?.() as
+    | Array<{ name?: unknown }>
+    | undefined;
+  if (!columns?.some((column) => column.name === "session_version")) {
+    try {
+      db.prepare(
+        "ALTER TABLE app_users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1",
+      ).run();
+    } catch (error) {
+      if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+    }
+  }
 }
 
 function ensureSettingsTable(db: DatabaseSync) {
@@ -244,9 +291,9 @@ function normalizeAppSettings(value: unknown): AppSettings {
         : "GameNote",
     avatarUrl: typeof source.avatarUrl === "string" ? source.avatarUrl : "",
     themeColor:
-      typeof source.themeColor === "string" && /^#[0-9a-f]{6}$/i.test(source.themeColor)
+      typeof source.themeColor === "string" && isAccessibleThemeColor(source.themeColor)
         ? source.themeColor
-        : "#ef5b2a",
+        : defaultThemeColor,
     showNintendoSwitch: source.showNintendoSwitch !== false,
     showPlayStation: source.showPlayStation !== false,
     showPsPlusCatalog: source.showPsPlusCatalog !== false,
@@ -265,14 +312,38 @@ function normalizeAppSettings(value: unknown): AppSettings {
   };
 }
 
-function writeLedgerToOpenSqlite(db: DatabaseSync, document: LedgerDocument) {
-  db.prepare(
-    `INSERT INTO ledger_documents (id, records, updated_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       records = excluded.records,
-       updated_at = excluded.updated_at`,
-  ).run(ledgerId, JSON.stringify(document.records), document.updatedAt);
+function writeLedgerToOpenSqlite(
+  db: DatabaseSync,
+  document: LedgerDocument,
+  expectedUpdatedAt?: string,
+) {
+  if (expectedUpdatedAt === undefined) {
+    db.prepare(
+      `INSERT INTO ledger_documents (id, records, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         records = excluded.records,
+         updated_at = excluded.updated_at`,
+    ).run(ledgerId, JSON.stringify(document.records), document.updatedAt);
+    return true;
+  }
+
+  const result = db
+    .prepare(
+      `INSERT INTO ledger_documents (id, records, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         records = excluded.records,
+         updated_at = excluded.updated_at
+       WHERE ledger_documents.updated_at = ?`,
+    )
+    .run(
+      ledgerId,
+      JSON.stringify(document.records),
+      document.updatedAt,
+      expectedUpdatedAt,
+    ) as StatementRunResult;
+  return Number(result.changes ?? 0) > 0;
 }
 
 export async function openLedgerDatabase() {
@@ -401,19 +472,11 @@ function hasLedgerData(document: LedgerDocument) {
 }
 
 async function loadNodeSqlite(): Promise<LedgerSqliteModule> {
-  const nodeImport = new Function("specifier", "return import(specifier)") as (
-    specifier: string,
-  ) => Promise<LedgerSqliteModule>;
-
-  return nodeImport(["node:", "sqlite"].join(""));
+  return import("node:sqlite") as unknown as Promise<LedgerSqliteModule>;
 }
 
 async function loadFsPromises(): Promise<FsPromises> {
-  const nodeImport = new Function("specifier", "return import(specifier)") as (
-    specifier: string,
-  ) => Promise<FsPromises>;
-
-  return nodeImport(["node:", "fs", "/", "promises"].join(""));
+  return import("node:fs/promises") as unknown as Promise<FsPromises>;
 }
 
 function isAbsolutePath(path: string) {

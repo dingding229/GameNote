@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { hasValidAccessCookie } from "@/lib/auth/access";
 import { createLedgerDocument, type GameRecord } from "@/lib/ledger/schema";
 import {
+  LedgerConflictError,
   readAppSettings,
   readLedgerFromSqlite,
   writeLedgerToSqlite,
@@ -34,37 +35,48 @@ export async function POST(request: NextRequest) {
     const monthly = parseMonthlyGames(await response.text());
     if (!monthly)
       return NextResponse.json({ added: 0, games: [], message: "暂未找到当月 PS Plus 会免阵容" });
-    const ledger = await readLedgerFromSqlite();
-    const additions = monthly.games
-      .filter(
-        (title) =>
-          !ledger.records.some(
-            (record) =>
-              record.notes.includes(`PS Plus 会免 ${monthly.month}`) &&
-              normalizeTitle(record.title) === normalizeTitle(title),
-          ),
-      )
-      .map(
-        (title): GameRecord => ({
-          id: crypto.randomUUID(),
-          platform: "PlayStation",
-          title,
-          price: 0,
-          currency: "CNY",
-          purchaseDate: new Date().toISOString().slice(0, 10),
-          region: "其他",
-          format: "数字版",
-          seller: "PlayStation Plus",
-          coverUrl: "",
-          officialUrl: monthly.url,
-          notes: `PS Plus 会免 ${monthly.month}`,
-          soldDate: "",
-          soldPrice: 0,
-          soldCurrency: "CNY",
-        }),
-      );
-    if (additions.length)
-      await writeLedgerToSqlite(createLedgerDocument([...additions, ...ledger.records]));
+    let additions: GameRecord[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const ledger = await readLedgerFromSqlite();
+      additions = monthly.games
+        .filter(
+          (title) =>
+            !ledger.records.some(
+              (record) =>
+                record.notes.includes(`PS Plus 会免 ${monthly.month}`) &&
+                normalizeTitle(record.title) === normalizeTitle(title),
+            ),
+        )
+        .map(
+          (title): GameRecord => ({
+            id: crypto.randomUUID(),
+            platform: "PlayStation",
+            title,
+            price: 0,
+            currency: "CNY",
+            purchaseDate: new Date().toISOString().slice(0, 10),
+            region: "其他",
+            format: "数字版",
+            seller: "PlayStation Plus",
+            coverUrl: "",
+            officialUrl: monthly.url,
+            notes: `PS Plus 会免 ${monthly.month}`,
+            soldDate: "",
+            soldPrice: 0,
+            soldCurrency: "CNY",
+          }),
+        );
+      if (!additions.length) break;
+      try {
+        await writeLedgerToSqlite(
+          createLedgerDocument([...additions, ...ledger.records]),
+          ledger.updatedAt,
+        );
+        break;
+      } catch (error) {
+        if (!(error instanceof LedgerConflictError) || attempt === 2) throw error;
+      }
+    }
     return NextResponse.json({
       added: additions.length,
       games: monthly.games,

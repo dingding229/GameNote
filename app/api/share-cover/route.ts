@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { hasValidAccessCookie } from "@/lib/auth/access";
 
 export const runtime = "nodejs";
 const maxImageBytes = 15 * 1024 * 1024;
+const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
 
 export async function GET(request: NextRequest) {
+  if (!(await hasValidAccessCookie(request)))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const value = request.nextUrl.searchParams.get("url");
   let url: URL;
 
@@ -28,9 +32,9 @@ export async function GET(request: NextRequest) {
       redirect: "error",
       signal: AbortSignal.timeout(10_000),
     });
-    const contentType = response.headers.get("content-type") || "";
+    const contentType = (response.headers.get("content-type") || "").split(";", 1)[0].toLowerCase();
 
-    if (!response.ok || !contentType.startsWith("image/")) {
+    if (!response.ok || !allowedImageTypes.has(contentType)) {
       return NextResponse.json({ error: "image unavailable" }, { status: 502 });
     }
 
@@ -43,16 +47,39 @@ export async function GET(request: NextRequest) {
     if (image.byteLength > maxImageBytes) {
       return NextResponse.json({ error: "image too large" }, { status: 413 });
     }
+    if (!hasExpectedImageSignature(new Uint8Array(image), contentType))
+      return NextResponse.json({ error: "invalid image data" }, { status: 415 });
 
     return new NextResponse(image, {
       headers: {
-        "cache-control": "public, max-age=86400",
+        "cache-control": "private, max-age=86400",
         "content-type": contentType,
+        "content-security-policy": "default-src 'none'; sandbox",
+        "x-content-type-options": "nosniff",
       },
     });
   } catch {
     return NextResponse.json({ error: "image unavailable" }, { status: 502 });
   }
+}
+
+function hasExpectedImageSignature(bytes: Uint8Array, contentType: string) {
+  if (contentType === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8;
+  if (contentType === "image/png")
+    return bytes
+      .slice(0, 8)
+      .every((byte, index) => byte === [137, 80, 78, 71, 13, 10, 26, 10][index]);
+  if (contentType === "image/webp")
+    return ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WEBP";
+  if (contentType === "image/avif") {
+    const brand = ascii(bytes, 4, 12);
+    return brand.startsWith("ftyp") && /avif|avis|mif1/.test(ascii(bytes, 8, 32));
+  }
+  return false;
+}
+
+function ascii(bytes: Uint8Array, start: number, end: number) {
+  return String.fromCharCode(...bytes.slice(start, end));
 }
 
 async function isPublicImageUrl(url: URL) {

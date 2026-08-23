@@ -5,6 +5,7 @@ import {
   verifyAccessSessionToken,
   type AccessIdentity,
 } from "@/lib/auth/session-token";
+import { getRegisteredUser } from "@/lib/ledger/repository";
 
 export { accessCookieName };
 
@@ -22,7 +23,17 @@ export function getJwtSecret() {
 
 export async function getAccessIdentity(request: NextRequest) {
   const cookie = request.cookies.get(accessCookieName)?.value ?? "";
-  return verifyAccessSessionToken(cookie, getJwtSecret());
+  const identity = await verifyAccessSessionToken(cookie, getJwtSecret());
+  if (!identity) return null;
+  const user = await getRegisteredUser();
+  if (
+    !user ||
+    user.id !== identity.id ||
+    user.username !== identity.username ||
+    user.sessionVersion !== identity.sessionVersion
+  )
+    return null;
+  return identity;
 }
 
 export async function hasValidAccessCookie(request: NextRequest) {

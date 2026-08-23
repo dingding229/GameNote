@@ -54,6 +54,7 @@ export async function resolveGameTitles(query: string): Promise<ResolvedGameTitl
 
       const searchResponse = await fetch(searchUrl, {
         headers: { "user-agent": "GameNote/0.1 game title lookup" },
+        signal: AbortSignal.timeout(8_000),
       });
       if (!searchResponse.ok) {
         continue;
@@ -90,6 +91,7 @@ export async function resolveGameTitles(query: string): Promise<ResolvedGameTitl
 
     const entityResponse = await fetch(entityUrl, {
       headers: { "user-agent": "GameNote/0.1 game title lookup" },
+      signal: AbortSignal.timeout(8_000),
     });
     if (!entityResponse.ok) {
       const fallback = await resolveTranslatedTitles(trimmed);
@@ -269,6 +271,7 @@ async function translateTitle(value: string, targetLanguage: "en" | "zh-CN") {
     }).toString();
     const response = await fetch(url, {
       headers: { "user-agent": "Mozilla/5.0 Game Purchase Ledger" },
+      signal: AbortSignal.timeout(8_000),
     });
     if (!response.ok) {
       return "";

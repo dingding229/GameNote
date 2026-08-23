@@ -2,6 +2,8 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { normalizeChineseSearchText } from "@/lib/game/title-normalization";
+import { ledgerLimits } from "@/lib/ledger/limits";
+import { defaultThemeColor, themeColorContent } from "@/lib/ui/theme-color";
 import { AppToolbar, Stat } from "./components/app-toolbar";
 import {
   catalogPageSize,
@@ -13,6 +15,7 @@ import {
 } from "./constants";
 import { MembershipPage, SettingsPage } from "./components/settings-pages";
 import { PsPlusCatalogPage } from "./components/ps-plus-catalog-page";
+import { useDialogAccessibility } from "./hooks/use-dialog-accessibility";
 import {
   fetchLedgerFromServer,
   loadLegacyLocalRecords,
@@ -54,6 +57,7 @@ import {
   formatOptionsForPlatform,
   isPhysicalFormat,
   lookupPriceLabel,
+  maxShareImageRecords,
   normalizeFormatForPlatform,
   normalizeLookupCurrency,
   officialUrlLabel,
@@ -77,6 +81,8 @@ export default function LedgerClient({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveRequestRef = useRef(0);
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const ledgerUpdatedAtRef = useRef("");
   const [records, setRecords] = useState<GameRecord[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -120,7 +126,7 @@ export default function LedgerClient({
   const [settings, setSettings] = useState<SettingsState>({
     siteTitle: "GameNote",
     avatarUrl: "",
-    themeColor: "#ef5b2a",
+    themeColor: defaultThemeColor,
     showNintendoSwitch: true,
     showPlayStation: true,
     showPsPlusCatalog: true,
@@ -147,6 +153,11 @@ export default function LedgerClient({
   const [catalogStatus, setCatalogStatus] = useState<"idle" | "loading" | "error">("idle");
   const [catalogError, setCatalogError] = useState("");
   const [catalogVisibleCount, setCatalogVisibleCount] = useState(catalogPageSize);
+  const shareDialogRef = useDialogAccessibility(shareOpen, closeSharePanel);
+  const recognizeDialogRef = useDialogAccessibility(recognizeOpen, () => setRecognizeOpen(false));
+  const authDialogRef = useDialogAccessibility<HTMLFormElement>(authPanelOpen, () =>
+    setAuthPanelOpen(false),
+  );
 
   const loadLedger = useCallback(
     async (authenticated: boolean) => {
@@ -159,6 +170,7 @@ export default function LedgerClient({
       try {
         const serverLedger = await fetchLedgerFromServer();
         const serverRecords = serverLedger.records;
+        ledgerUpdatedAtRef.current = serverLedger.updatedAt;
         const legacyRecords = authenticated ? loadLegacyLocalRecords() : [];
         const nextRecords =
           serverRecords.length || !legacyRecords.length ? serverRecords : legacyRecords;
@@ -293,6 +305,7 @@ export default function LedgerClient({
 
   function updateThemeColor(color: string) {
     document.documentElement.style.setProperty("--color-primary", color);
+    document.documentElement.style.setProperty("--color-primary-content", themeColorContent(color));
     window.localStorage.setItem("gamenote-theme-color", color);
   }
 
@@ -329,7 +342,8 @@ export default function LedgerClient({
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "修改失败");
       setSettings((current) => ({ ...current, currentPassword: "", newPassword: "" }));
-      setSettingsStatus("密码已修改");
+      setSettingsStatus("密码已修改，请重新登录");
+      await loadLedger(false);
     } catch (error) {
       setSettingsStatus(error instanceof Error ? error.message : "修改失败");
     }
@@ -554,8 +568,11 @@ export default function LedgerClient({
     const requestId = saveRequestRef.current + 1;
     saveRequestRef.current = requestId;
     const timeoutId = window.setTimeout(() => {
-      saveLedgerToServer(records)
-        .then(() => {
+      saveChainRef.current = saveChainRef.current
+        .then(async () => {
+          if (saveRequestRef.current !== requestId) return;
+          const updatedAt = await saveLedgerToServer(records, ledgerUpdatedAtRef.current);
+          ledgerUpdatedAtRef.current = updatedAt;
           if (saveRequestRef.current === requestId) {
             setRecordsDirty(false);
             setSaveStatus("saved");
@@ -999,6 +1016,7 @@ export default function LedgerClient({
     }
 
     try {
+      if (file.size > ledgerLimits.maxRequestBytes) throw new Error("JSON 文件不能超过 5MB");
       const parsed = JSON.parse(await file.text()) as unknown;
       const parsedRecords = Array.isArray(parsed)
         ? parsed
@@ -1009,6 +1027,8 @@ export default function LedgerClient({
       if (!Array.isArray(parsedRecords)) {
         throw new Error("Expected an array");
       }
+      if (parsedRecords.length > ledgerLimits.maxRecords)
+        throw new Error(`记录数量不能超过 ${ledgerLimits.maxRecords} 条`);
 
       const importedRecords = parsedRecords
         .map(normalizeImportedRecord)
@@ -1023,8 +1043,8 @@ export default function LedgerClient({
       setSaveStatus("saving");
       resetForm();
       setSettingsStatus(`已导入 ${importedRecords.length} 条记录`);
-    } catch {
-      window.alert("JSON 文件不是有效的游戏购买记录");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "JSON 文件不是有效的游戏购买记录");
     } finally {
       event.target.value = "";
     }
@@ -2012,16 +2032,22 @@ export default function LedgerClient({
                       onMouseDown={closeSharePanel}
                     >
                       <section
+                        ref={shareDialogRef}
                         className="share-dialog"
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="share-dialog-title"
+                        tabIndex={-1}
                         onMouseDown={(event) => event.stopPropagation()}
                       >
                         <div className="share-dialog-header">
                           <div>
                             <h2 id="share-dialog-title">分享我的游戏收藏</h2>
-                            <p>将全部 {records.length} 款游戏生成一张图片</p>
+                            <p>
+                              {records.length > maxShareImageRecords
+                                ? `共 ${records.length} 款，本图展示前 ${maxShareImageRecords} 款`
+                                : `将全部 ${records.length} 款游戏生成一张图片`}
+                            </p>
                           </div>
                           <button className="ghost-button" type="button" onClick={closeSharePanel}>
                             关闭
@@ -2094,10 +2120,12 @@ export default function LedgerClient({
                       onMouseDown={() => setRecognizeOpen(false)}
                     >
                       <section
+                        ref={recognizeDialogRef}
                         className="share-dialog purchase-recognition-dialog"
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="recognize-title"
+                        tabIndex={-1}
                         onMouseDown={(event) => event.stopPropagation()}
                       >
                         <div className="share-dialog-header">
@@ -2340,10 +2368,12 @@ export default function LedgerClient({
                   onMouseDown={() => setAuthPanelOpen(false)}
                 >
                   <form
+                    ref={authDialogRef}
                     className="login-card grid w-full max-w-md gap-4 p-5 sm:p-6"
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="auth-dialog-title"
+                    tabIndex={-1}
                     onSubmit={submitPassword}
                     onMouseDown={(event) => event.stopPropagation()}
                   >

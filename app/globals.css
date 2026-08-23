@@ -9,8 +9,8 @@
   --color-base-200: #f6f7f8;
   --color-base-300: #e5e7eb;
   --color-base-content: #20242a;
-  --color-primary: #ef5b2a;
-  --color-primary-content: oklch(99% 0.012 72);
+  --color-primary: #b9472f;
+  --color-primary-content: #ffffff;
   --color-secondary: oklch(49% 0.13 18);
   --color-secondary-content: oklch(99% 0.012 72);
   --color-accent: oklch(72% 0.14 78);
@@ -43,17 +43,14 @@ html {
 }
 
 body {
+  background: #ffffff;
+  color: var(--color-base-content);
+  font-family: Arial, Helvetica, sans-serif;
   margin: 0;
   min-height: 100%;
   overflow-x: clip;
   padding: 0;
   width: 100%;
-}
-
-body {
-  background: #ffffff;
-  color: var(--color-base-content);
-  font-family: Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -71,6 +68,13 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
+}
+
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-primary) 42%, white);
+  outline-offset: 2px;
 }
 
 .ledger-page,

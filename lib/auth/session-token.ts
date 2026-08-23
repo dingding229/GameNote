@@ -1,7 +1,7 @@
 export const accessCookieName = "switch_ledger_access";
 export const defaultSessionMaxAge = 60 * 60 * 24 * 30;
 
-export type AccessIdentity = { id: string; username: string };
+export type AccessIdentity = { id: string; username: string; sessionVersion: number };
 
 export async function createAccessSessionToken(
   identity: AccessIdentity,
@@ -13,6 +13,7 @@ export async function createAccessSessionToken(
   const payload = {
     sub: identity.id,
     username: identity.username,
+    sessionVersion: identity.sessionVersion,
     iat: now,
     exp: now + maxAge,
   };
@@ -30,18 +31,24 @@ export async function verifyAccessSessionToken(token: string, secret: string) {
   const payload = parseBase64UrlJson(encodedPayload) as {
     sub?: unknown;
     username?: unknown;
+    sessionVersion?: unknown;
     exp?: unknown;
   } | null;
   if (
     !payload ||
     typeof payload.sub !== "string" ||
     typeof payload.username !== "string" ||
+    typeof payload.sessionVersion !== "number" ||
     typeof payload.exp !== "number" ||
     payload.exp <= Date.now() / 1000
   )
     return null;
 
-  return { id: payload.sub, username: payload.username } satisfies AccessIdentity;
+  return {
+    id: payload.sub,
+    username: payload.username,
+    sessionVersion: payload.sessionVersion,
+  } satisfies AccessIdentity;
 }
 
 async function hmacSign(value: string, secret: string) {

@@ -1,20 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasValidAccessCookie } from "@/lib/auth/access";
-import { readLedgerFromSqlite, writeLedgerToSqlite } from "@/lib/ledger/repository";
+import {
+  LedgerConflictError,
+  readLedgerFromSqlite,
+  writeLedgerToSqlite,
+} from "@/lib/ledger/repository";
 import { createLedgerDocument, normalizeRecords } from "@/lib/ledger/schema";
-import { normalizeChineseGameTitle } from "@/lib/game/title-normalization";
-import { resolveChineseGameTitle } from "@/lib/game/title-resolution";
-import type { GameRecord, LedgerDocument } from "@/lib/ledger/schema";
+import { ledgerLimits } from "@/lib/ledger/limits";
 
 type SavePayload = {
   records?: unknown;
+  updatedAt?: unknown;
 };
 
 export const runtime = "nodejs";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const document = await localizeLedgerDocument(await readLedgerFromSqlite());
+    const document = await readLedgerFromSqlite();
     return NextResponse.json(document, {
       headers: { "cache-control": "no-store" },
     });
@@ -28,66 +31,41 @@ export async function PUT(request: NextRequest) {
     return unauthorized();
   }
 
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > ledgerLimits.maxRequestBytes)
+    return NextResponse.json({ error: "导入数据超过 5MB 限制" }, { status: 413 });
+
   const payload = (await request.json().catch(() => ({}))) as SavePayload;
 
   if (!Array.isArray(payload.records)) {
     return NextResponse.json({ error: "records must be an array" }, { status: 400 });
   }
+  if (payload.records.length > ledgerLimits.maxRecords)
+    return NextResponse.json(
+      { error: `记录数量不能超过 ${ledgerLimits.maxRecords} 条` },
+      { status: 413 },
+    );
+  if (typeof payload.updatedAt !== "string")
+    return NextResponse.json({ error: "缺少数据版本，请刷新后重试" }, { status: 400 });
 
-  const records = await localizeRecords(normalizeRecords(payload.records));
+  const records = normalizeRecords(payload.records);
 
   try {
     const document = createLedgerDocument(records);
 
-    await writeLedgerToSqlite(document);
+    await writeLedgerToSqlite(document, payload.updatedAt);
 
     return NextResponse.json(document, {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {
+    if (error instanceof LedgerConflictError)
+      return NextResponse.json(
+        { error: "数据已被其他页面更新，请刷新后再保存", conflict: true },
+        { status: 409, headers: { "cache-control": "no-store" } },
+      );
     return storageFailure("保存数据库记录失败", error);
   }
-}
-
-async function localizeLedgerDocument(document: LedgerDocument): Promise<LedgerDocument> {
-  return { ...document, records: await localizeRecords(document.records) };
-}
-
-async function localizeRecords(records: GameRecord[]) {
-  const titles = [
-    ...new Set(
-      records.map((record) => record.title).filter((title) => !/[\u3400-\u9fff]/u.test(title)),
-    ),
-  ];
-  const localizedTitles = new Map<string, string>();
-
-  await mapWithConcurrency(titles, 4, async (title) => {
-    const resolvedTitle = await resolveChineseGameTitle(title);
-    localizedTitles.set(title, resolvedTitle ? normalizeChineseGameTitle(resolvedTitle) : title);
-  });
-
-  return records.map((record) => {
-    const localizedTitle = localizedTitles.get(record.title);
-    return localizedTitle && localizedTitle !== record.title
-      ? { ...record, title: localizedTitle }
-      : record;
-  });
-}
-
-async function mapWithConcurrency<T>(
-  values: T[],
-  concurrency: number,
-  task: (value: T) => Promise<void>,
-) {
-  let nextIndex = 0;
-  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-    while (nextIndex < values.length) {
-      const value = values[nextIndex];
-      nextIndex += 1;
-      await task(value);
-    }
-  });
-  await Promise.all(workers);
 }
 
 function unauthorized() {
@@ -101,17 +79,7 @@ function storageFailure(action: string, error: unknown) {
   console.error(action, error);
 
   return NextResponse.json(
-    { error: describeStorageError(action, error) },
+    { error: action },
     { status: 500, headers: { "cache-control": "no-store" } },
   );
-}
-
-function describeStorageError(action: string, error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-
-  if (message) {
-    return `${action}：${message}`;
-  }
-
-  return action;
 }

@@ -2,6 +2,7 @@ import {
   normalizeStoredGameTitle,
   stripPlayStationStoreTitleMetadata,
 } from "@/lib/game/title-normalization";
+import { ledgerLimits, limitText, validLedgerNumber } from "./limits";
 
 export type Region = "日版" | "港版" | "台版" | "美版" | "欧版" | "其他";
 export type GamePlatform = "Nintendo Switch" | "PlayStation";
@@ -77,7 +78,10 @@ export function normalizeLedgerDocument(value: unknown): LedgerDocument {
 }
 
 export function normalizeRecords(values: unknown[]): GameRecord[] {
-  return values.map(normalizeRecord).filter((record): record is GameRecord => Boolean(record));
+  return values
+    .slice(0, ledgerLimits.maxRecords)
+    .map(normalizeRecord)
+    .filter((record): record is GameRecord => Boolean(record));
 }
 
 export function normalizeRecord(value: unknown): GameRecord | null {
@@ -126,12 +130,17 @@ export function normalizeRecord(value: unknown): GameRecord | null {
           : "";
 
   return {
-    id: typeof record.id === "string" ? record.id : createId(),
+    id: limitText(record.id, ledgerLimits.id) || createId(),
     platform,
     title: normalizeStoredGameTitle(
-      platform === "PlayStation" ? stripPlayStationStoreTitleMetadata(record.title) : record.title,
+      limitText(
+        platform === "PlayStation"
+          ? stripPlayStationStoreTitleMetadata(record.title)
+          : record.title,
+        ledgerLimits.title,
+      ),
     ),
-    price: Number(record.price) || 0,
+    price: validLedgerNumber(record.price),
     currency,
     purchaseDate:
       typeof record.purchaseDate === "string" && record.purchaseDate
@@ -139,12 +148,12 @@ export function normalizeRecord(value: unknown): GameRecord | null {
         : new Date().toISOString().slice(0, 10),
     region,
     format,
-    seller: isPhysicalFormat(format) && typeof record.seller === "string" ? record.seller : "",
-    coverUrl: typeof record.coverUrl === "string" ? record.coverUrl : "",
-    officialUrl,
-    notes: typeof record.notes === "string" ? record.notes : "",
+    seller: isPhysicalFormat(format) ? limitText(record.seller, ledgerLimits.seller) : "",
+    coverUrl: limitText(record.coverUrl, ledgerLimits.url),
+    officialUrl: limitText(officialUrl, ledgerLimits.url),
+    notes: limitText(record.notes, ledgerLimits.notes),
     soldDate,
-    soldPrice: soldDate ? Number(record.soldPrice) || 0 : 0,
+    soldPrice: soldDate ? validLedgerNumber(record.soldPrice) : 0,
     soldCurrency,
   };
 }

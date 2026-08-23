@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessIdentity } from "@/lib/auth/access";
+import { accessCookieName, getAccessIdentity } from "@/lib/auth/access";
 import {
   getRegisteredUser,
   readAppSettings,
@@ -7,6 +7,7 @@ import {
   writeAppSettings,
 } from "@/lib/ledger/repository";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { isAccessibleThemeColor } from "@/lib/ui/theme-color";
 
 export const runtime = "nodejs";
 const datePattern = /^$|^\d{4}-\d{2}-\d{2}$/;
@@ -108,6 +109,11 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "设置内容无效" }, { status: 400 });
   if (avatarUrl.length > 750_000)
     return NextResponse.json({ error: "头像图片过大" }, { status: 400 });
+  if (!isAccessibleThemeColor(themeColor))
+    return NextResponse.json(
+      { error: "主题色与白色背景对比度不足，请选择更深的颜色" },
+      { status: 400 },
+    );
   await writeAppSettings({
     siteTitle,
     avatarUrl,
@@ -164,10 +170,17 @@ export async function PATCH(request: NextRequest) {
     typeof payload.currentPassword === "string" ? payload.currentPassword : "";
   const newPassword = typeof payload.newPassword === "string" ? payload.newPassword : "";
   const user = await getRegisteredUser();
-  if (!user || !verifyPassword(currentPassword, user.passwordHash))
+  if (!user || !(await verifyPassword(currentPassword, user.passwordHash)))
     return NextResponse.json({ error: "当前密码不正确" }, { status: 401 });
   if (newPassword.length < 8 || newPassword.length > 128)
     return NextResponse.json({ error: "新密码需为 8-128 位" }, { status: 400 });
-  await updateRegisteredUserPassword(hashPassword(newPassword));
-  return NextResponse.json({ updated: true });
+  await updateRegisteredUserPassword(await hashPassword(newPassword));
+  const response = NextResponse.json({ updated: true, signedOut: true });
+  response.cookies.set(accessCookieName, "", {
+    httpOnly: true,
+    maxAge: 0,
+    path: "/",
+    sameSite: "strict",
+  });
+  return response;
 }

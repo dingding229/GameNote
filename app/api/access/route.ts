@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { accessCookieName, createSessionToken, getAccessIdentity } from "@/lib/auth/access";
 import { createRegisteredUser, getRegisteredUser } from "@/lib/ledger/repository";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import {
+  checkLoginRateLimit,
+  clearFailedLogins,
+  loginRateLimitKey,
+  recordFailedLogin,
+} from "@/lib/auth/login-rate-limit";
 
 export const runtime = "nodejs";
 const sessionMaxAge = 60 * 60 * 24 * 30;
@@ -29,18 +35,40 @@ export async function POST(request: NextRequest) {
   if (password.length < 8 || password.length > 128)
     return NextResponse.json({ error: "密码需为 8-128 位" }, { status: 400 });
 
+  const clientIp =
+    request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || "";
+  const rateLimitKey = loginRateLimitKey(clientIp.trim(), username);
+  const rateLimit = checkLoginRateLimit(rateLimitKey);
+  if (!rateLimit.allowed)
+    return NextResponse.json(
+      { error: "登录尝试过多，请稍后再试" },
+      { status: 429, headers: { "retry-after": String(rateLimit.retryAfter) } },
+    );
+
   let user = await getRegisteredUser();
   if (action === "register") {
     if (user) return NextResponse.json({ error: "管理员账号已注册" }, { status: 409 });
-    user = { id: "owner", username, passwordHash: hashPassword(password) };
+    user = {
+      id: "owner",
+      username,
+      passwordHash: await hashPassword(password),
+      sessionVersion: 1,
+    };
     try {
       await createRegisteredUser(user);
     } catch {
       return NextResponse.json({ error: "管理员账号已注册" }, { status: 409 });
     }
-  } else if (!user || user.username !== username || !verifyPassword(password, user.passwordHash)) {
+  } else if (
+    !user ||
+    user.username !== username ||
+    !(await verifyPassword(password, user.passwordHash))
+  ) {
+    recordFailedLogin(rateLimitKey);
     return NextResponse.json({ error: "账号或密码不正确" }, { status: 401 });
   }
+
+  clearFailedLogins(rateLimitKey);
 
   const response = NextResponse.json({ authenticated: true, username: user.username });
   response.cookies.set(accessCookieName, await createSessionToken(user), {

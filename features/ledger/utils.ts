@@ -174,7 +174,10 @@ function truncateCanvasText(context: CanvasRenderingContext2D, value: string, ma
   return `${text}…`;
 }
 
+export const maxShareImageRecords = 160;
+
 export async function createLibraryShareImage(records: GameRecord[], options: ShareOptions) {
+  const visibleRecords = records.slice(0, maxShareImageRecords);
   const width = 1200;
   const columns = 4;
   const gap = 18;
@@ -187,7 +190,7 @@ export async function createLibraryShareImage(records: GameRecord[], options: Sh
     Number(options.showSale) +
     Number(options.showNotes);
   const cardHeight = coverHeight + 76 + detailLines * 24;
-  const rows = Math.max(1, Math.ceil(records.length / columns));
+  const rows = Math.max(1, Math.ceil(visibleRecords.length / columns));
   const headerHeight = 170;
   const footerHeight = 72;
   const height = headerHeight + rows * cardHeight + (rows - 1) * gap + footerHeight;
@@ -206,13 +209,21 @@ export async function createLibraryShareImage(records: GameRecord[], options: Sh
   context.fillText("我的游戏收藏", pagePadding, 78);
   context.fillStyle = "#786b65";
   context.font = "24px Arial, sans-serif";
-  context.fillText(`共 ${records.length} 款游戏`, pagePadding, 120);
+  context.fillText(
+    records.length > visibleRecords.length
+      ? `共 ${records.length} 款，本图展示前 ${visibleRecords.length} 款`
+      : `共 ${records.length} 款游戏`,
+    pagePadding,
+    120,
+  );
   context.textAlign = "right";
   context.fillText(new Date().toLocaleDateString("zh-CN"), width - pagePadding, 120);
   context.textAlign = "left";
 
-  const covers = await Promise.all(records.map((record) => loadShareCover(record.coverUrl)));
-  records.forEach((record, index) => {
+  const covers = await mapWithConcurrency(visibleRecords, 6, (record) =>
+    loadShareCover(record.coverUrl),
+  );
+  visibleRecords.forEach((record, index) => {
     const column = index % columns;
     const row = Math.floor(index / columns);
     const x = pagePadding + column * (cardWidth + gap);
@@ -287,6 +298,24 @@ export async function createLibraryShareImage(records: GameRecord[], options: Sh
       "image/png",
     );
   });
+}
+
+async function mapWithConcurrency<T, Result>(
+  values: T[],
+  concurrency: number,
+  task: (value: T) => Promise<Result>,
+) {
+  const results = new Array<Result>(values.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await task(values[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 export function saveStatusLabel(status: SaveStatus) {
