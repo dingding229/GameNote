@@ -100,11 +100,11 @@ docker compose up -d --build
 
 ```yaml
 services:
-  switch-ledger:
+  gamenote:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: switch-ledger
+    container_name: gamenote
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -135,10 +135,11 @@ services:
 ```bash
 # 更新并重新构建
 git pull
+docker compose down --remove-orphans
 docker compose up -d --build
 
 # 查看日志
-docker compose logs -f switch-ledger
+docker compose logs -f gamenote
 
 # 停止服务但保留数据
 docker compose down
@@ -146,6 +147,7 @@ docker compose down
 
 ### 从旧版本升级
 
+- Docker 服务名与容器名已统一为 `gamenote`；首次升级请执行上面的 `docker compose down --remove-orphans`，清理旧的 `switch-ledger` 容器后再启动。
 - 数据库会自动增加会话版本字段，无需手工执行 SQL。
 - 升级后旧版登录 Cookie 会失效，管理员重新登录一次即可。
 - 旧版默认橙色对比度不足时会自动回退为新的深橙色；其他可访问主题色保持不变。

@@ -1,9 +1,9 @@
 services:
-  switch-ledger:
+  gamenote:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: switch-ledger
+    container_name: gamenote
     restart: unless-stopped
     ports:
       - "3000:3000"
