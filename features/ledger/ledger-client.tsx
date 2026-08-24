@@ -92,6 +92,7 @@ export default function LedgerClient({
   const coverLookupRequestRef = useRef(0);
   const [records, setRecords] = useState<GameRecord[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [saleEnabled, setSaleEnabled] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>(initialView);
   const [recordDisplayMode, setRecordDisplayMode] = useState<RecordDisplayMode>("grid");
@@ -210,6 +211,7 @@ export default function LedgerClient({
           setSaveStatus("saving");
         }
         setForm(createEmptyForm(initialPlatform));
+        setSaleEnabled(false);
         setActiveView(initialView);
         setStorageReady(true);
       } catch (error) {
@@ -285,6 +287,7 @@ export default function LedgerClient({
       if (editingId || activeView === "form") {
         setEditingId(null);
         setForm(createEmptyForm(platform));
+        setSaleEnabled(false);
         setActiveView("records");
       }
     },
@@ -912,6 +915,7 @@ export default function LedgerClient({
     coverLookupRequestRef.current += 1;
     setEditingId(null);
     setForm(createEmptyForm(activePlatform));
+    setSaleEnabled(false);
     setCoverResults([]);
     setCoverError("");
     setCoverStatus("idle");
@@ -957,8 +961,11 @@ export default function LedgerClient({
       notes: form.notes.trim(),
       price: Number(form.price) || 0,
       format: normalizeFormatForPlatform(form.format, form.platform),
-      soldDate: isPhysicalFormat(form.format) ? form.soldDate : "",
-      soldPrice: isPhysicalFormat(form.format) && form.soldDate ? Number(form.soldPrice) || 0 : 0,
+      soldDate: isPhysicalFormat(form.format) && saleEnabled ? form.soldDate : "",
+      soldPrice:
+        isPhysicalFormat(form.format) && saleEnabled && form.soldDate
+          ? Number(form.soldPrice) || 0
+          : 0,
       soldCurrency: form.soldCurrency,
     };
 
@@ -994,6 +1001,7 @@ export default function LedgerClient({
     setEditingId(record.id);
     setPlatformUrl(record.platform, "replace");
     setActivePlatform(record.platform);
+    setSaleEnabled(Boolean(record.soldDate));
     setForm({
       platform: record.platform,
       title: record.title,
@@ -1014,6 +1022,7 @@ export default function LedgerClient({
   }
 
   function updateFormat(format: GameFormat) {
+    if (!isPhysicalFormat(format)) setSaleEnabled(false);
     setForm((current) => ({
       ...current,
       format,
@@ -1031,6 +1040,9 @@ export default function LedgerClient({
     setActivePlatform(platform);
     setCoverResults([]);
     setCoverError("");
+    if (!isPhysicalFormat(normalizeFormatForPlatform(form.format, platform))) {
+      setSaleEnabled(false);
+    }
     setForm((current) => ({
       ...current,
       platform,
@@ -1045,6 +1057,7 @@ export default function LedgerClient({
   }
 
   function toggleSold(checked: boolean) {
+    setSaleEnabled(checked);
     setForm((current) => ({
       ...current,
       soldDate: checked ? current.soldDate || todayString() : "",
@@ -1178,6 +1191,7 @@ export default function LedgerClient({
     setEditingId(null);
     setPlatformUrl(game.platform, "replace");
     setActivePlatform(game.platform);
+    setSaleEnabled(false);
     setForm(nextForm);
     setCoverResults([]);
     setCoverError("");
@@ -1754,13 +1768,13 @@ export default function LedgerClient({
                             <label className="checkbox-field">
                               <input
                                 type="checkbox"
-                                checked={Boolean(form.soldDate)}
+                                checked={saleEnabled}
                                 onChange={(event) => toggleSold(event.target.checked)}
                               />
                               <span>这份实体游戏已卖出</span>
                             </label>
 
-                            {form.soldDate ? (
+                            {saleEnabled ? (
                               <>
                                 <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(12rem,0.8fr)]">
                                   <label className="field">
