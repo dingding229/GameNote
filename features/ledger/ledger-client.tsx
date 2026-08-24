@@ -437,16 +437,22 @@ export default function LedgerClient({
         const payload = (await response.json().catch(() => ({}))) as {
           added?: number;
           updated?: number;
+          removedDuplicates?: number;
           message?: string;
           error?: string;
         };
         if (!response.ok) throw new Error(payload.error || "同步失败");
-        if ((payload.added || 0) > 0 || (payload.updated || 0) > 0) {
+        if (
+          (payload.added || 0) > 0 ||
+          (payload.updated || 0) > 0 ||
+          (payload.removedDuplicates || 0) > 0
+        ) {
           await loadLedger(true);
           setPsPlusStatus(
             [
               payload.added ? `已自动入库 ${payload.added} 款会免游戏` : "",
               payload.updated ? `已补全 ${payload.updated} 款已有会免信息` : "",
+              payload.removedDuplicates ? `已清理 ${payload.removedDuplicates} 条重复记录` : "",
             ]
               .filter(Boolean)
               .join("，"),

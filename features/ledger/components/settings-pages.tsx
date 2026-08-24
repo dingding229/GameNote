@@ -479,10 +479,7 @@ function MembershipPeriodSection({
   return (
     <section className="settings-section membership-section">
       <div className="membership-section-heading">
-        <div>
-          <h3>{service}</h3>
-          <p>新增续费记录不会覆盖已过期的历史时间段。</p>
-        </div>
+        <h3>{service}</h3>
         <button className="secondary-button" type="button" onClick={onAdd}>
           新增会员记录
         </button>

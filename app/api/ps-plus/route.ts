@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { hasValidAccessCookie } from "@/lib/auth/access";
 import { createLedgerDocument, type GameRecord } from "@/lib/ledger/schema";
 import { enrichMonthlyGames, parsePsPlusMonthlyFeed } from "@/lib/game/ps-plus-monthly";
+import { reconcileMonthlyGames } from "@/lib/game/ps-plus-monthly-sync";
 import {
   LedgerConflictError,
   readAppSettings,
@@ -36,67 +37,26 @@ export async function POST(request: NextRequest) {
     const monthly = parsePsPlusMonthlyFeed(await response.text());
     if (!monthly)
       return NextResponse.json({ added: 0, games: [], message: "暂未找到当月 PS Plus 会免阵容" });
-    const enrichedGames = await enrichMonthlyGames(monthly.games);
+    const official = await enrichMonthlyGames(monthly.games);
+    if (!official.games.length) throw new Error("未能从 PlayStation Store 匹配到当月游戏");
     let additions: GameRecord[] = [];
     let updated = 0;
+    let removedDuplicates = 0;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const ledger = await readLedgerFromSqlite();
-      updated = 0;
-      const refreshedRecords = ledger.records.map((record) => {
-        if (!record.notes.includes(`PS Plus 会免 ${monthly.month}`)) return record;
-        const gameIndex = enrichedGames.findIndex((game, index) =>
-          [game.title, monthly.games[index]?.title].some(
-            (title) => normalizeTitle(record.title) === normalizeTitle(title || ""),
-          ),
-        );
-        const game = enrichedGames[gameIndex];
-        if (!game) return record;
-        const refreshed = {
-          ...record,
-          title: game.title,
-          region: "港版" as const,
-          coverUrl: game.coverUrl || record.coverUrl,
-          officialUrl: game.officialUrl || record.officialUrl,
-        };
-        if (JSON.stringify(refreshed) !== JSON.stringify(record)) updated += 1;
-        return refreshed;
-      });
-      additions = enrichedGames
-        .filter(
-          (game, gameIndex) =>
-            !ledger.records.some(
-              (record) =>
-                record.notes.includes(`PS Plus 会免 ${monthly.month}`) &&
-                [game.title, monthly.games[gameIndex]?.title].some(
-                  (title) => normalizeTitle(record.title) === normalizeTitle(title || ""),
-                ),
-            ),
-        )
-        .map(
-          (game): GameRecord => ({
-            id: crypto.randomUUID(),
-            platform: "PlayStation",
-            title: game.title,
-            price: 0,
-            currency: "CNY",
-            purchaseDate: new Date().toISOString().slice(0, 10),
-            region: "港版",
-            format: "数字版",
-            seller: "PlayStation Plus",
-            coverUrl: game.coverUrl,
-            officialUrl: game.officialUrl,
-            notes: `PS Plus 会免 ${monthly.month}`,
-            soldDate: "",
-            soldPrice: 0,
-            soldCurrency: "CNY",
-          }),
-        );
-      if (!additions.length && !updated) break;
+      const reconciliation = reconcileMonthlyGames(
+        ledger.records,
+        official.games,
+        monthly.month,
+        new Date().toISOString().slice(0, 10),
+        () => crypto.randomUUID(),
+      );
+      additions = reconciliation.additions;
+      updated = reconciliation.updated;
+      removedDuplicates = reconciliation.removedDuplicates;
+      if (!additions.length && !updated && !removedDuplicates) break;
       try {
-        await writeLedgerToSqlite(
-          createLedgerDocument([...additions, ...refreshedRecords]),
-          ledger.updatedAt,
-        );
+        await writeLedgerToSqlite(createLedgerDocument(reconciliation.records), ledger.updatedAt);
         break;
       } catch (error) {
         if (!(error instanceof LedgerConflictError) || attempt === 2) throw error;
@@ -105,10 +65,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       added: additions.length,
       updated,
+      removedDuplicates,
       games: additions.map((game) => game.title),
       month: monthly.month,
       records: additions,
-      message: updated ? `已补全 ${updated} 款会免游戏的中文名、封面和官方链接` : "当月会免已同步",
+      unresolved: official.unresolved,
+      message: syncMessage(additions.length, updated, removedDuplicates, official.unresolved),
     });
   } catch (error) {
     return NextResponse.json(
@@ -118,6 +80,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function normalizeTitle(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, "");
+function syncMessage(added: number, updated: number, removed: number, unresolved: string[]) {
+  const changes = [
+    added ? `新增 ${added} 款` : "",
+    updated ? `更新 ${updated} 款` : "",
+    removed ? `清理 ${removed} 条重复记录` : "",
+  ].filter(Boolean);
+  const result = changes.length ? changes.join("，") : "当月会免已同步";
+  return unresolved.length ? `${result}；${unresolved.join("、")} 暂未匹配到港区 Store` : result;
 }

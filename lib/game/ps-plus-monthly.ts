@@ -1,8 +1,6 @@
-import { normalizeStoredGameTitle } from "./title-normalization";
-import { resolveChineseGameTitle } from "./title-resolution";
+export type MonthlyGame = { title: string };
 
-export type MonthlyGame = {
-  title: string;
+export type OfficialMonthlyGame = MonthlyGame & {
   coverUrl: string;
   officialUrl: string;
 };
@@ -14,12 +12,11 @@ export type MonthlyGames = {
 };
 
 type StoreMedia = { role?: string; type?: string; url?: string };
-type StoreProduct = {
+export type StoreProduct = {
   __typename?: string;
   id?: string;
   name?: string;
   platforms?: string[];
-  storeDisplayClassification?: string;
   media?: StoreMedia[];
   personalizedMeta?: { media?: StoreMedia[] };
   products?: Array<{ id?: string }>;
@@ -41,75 +38,56 @@ export function parsePsPlusMonthlyFeed(xml: string, now = new Date()): MonthlyGa
       continue;
     const monthName = rawTitle.match(/Monthly Games for ([A-Za-z]+)/i)?.[1];
     if (!monthName || monthName.toLowerCase() !== currentMonth.toLowerCase()) continue;
-    const separator = rawTitle.match(/(?:–|—|:| - )/);
-    if (!separator || separator.index === undefined) continue;
-    const fallbackTitles = rawTitle
-      .slice(separator.index + separator[0].length)
-      .split(/,| and /i)
-      .map((title) => title.trim())
-      .filter(Boolean)
-      .slice(0, 4);
     const articleUrl = decodeEntities(textBetween(item, "link"));
     const content = decodeEntities(textBetween(item, "content:encoded"), false);
-    const sections = extractGameSections(content);
-    const titles = sections.length ? sections.map((section) => section.title) : fallbackTitles;
+    const sectionTitles = extractGameTitles(content);
+    const titles = sectionTitles.length ? sectionTitles : extractHeadlineTitles(rawTitle);
     if (!titles.length) continue;
-    const images = [...content.matchAll(/<img[^>]+(?:data-src|src)=["']([^"']+)["']/gi)]
-      .map((image) => decodeEntities(image[1]))
-      .filter((url, index, values) => url.startsWith("https://") && values.indexOf(url) === index);
     const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
     return {
       month,
       url: articleUrl,
-      games: titles.map((title, index) => ({
-        title,
-        coverUrl: sections[index]?.coverUrl || images[index] || "",
-        officialUrl: articleUrl,
-      })),
+      games: titles.slice(0, 4).map((title) => ({ title })),
     };
   }
   return null;
 }
 
-function extractGameSections(content: string) {
-  const headings = [
-    ...content.matchAll(/<strong[^>]*>([\s\S]*?)\s*\|\s*PS(?:4|5)[^<]*<\/strong>/gi),
-  ];
-  return headings.slice(0, 4).flatMap((heading, index) => {
-    if (heading.index === undefined) return [];
-    const title = decodeEntities(heading[1]).trim();
-    if (!title) return [];
-    const end = headings[index + 1]?.index ?? content.length;
-    const section = content.slice(heading.index, end);
-    const coverUrl = decodeEntities(
-      section.match(/<img[^>]+(?:data-src|src)=["']([^"']+)["']/i)?.[1] || "",
-    );
-    return [{ title, coverUrl: coverUrl.startsWith("https://") ? coverUrl : "" }];
-  });
+function extractGameTitles(content: string) {
+  return [...content.matchAll(/<(h[2-4]|p)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)]
+    .map((heading) => decodeEntities(stripTags(heading[2])).replace(/\s+/g, " ").trim())
+    .filter((heading) => /\|\s*PS(?:4|5)\b/i.test(heading))
+    .map((heading) => heading.split(/\s*\|\s*PS(?:4|5)\b/i)[0].trim())
+    .filter((title, index, titles) => Boolean(title) && titles.indexOf(title) === index);
+}
+
+function extractHeadlineTitles(rawTitle: string) {
+  const separator = rawTitle.match(/(?:–|—|:| - )/);
+  if (!separator || separator.index === undefined) return [];
+  return rawTitle
+    .slice(separator.index + separator[0].length)
+    .split(/,| and /i)
+    .map((title) => title.trim())
+    .filter(Boolean);
 }
 
 export async function enrichMonthlyGames(games: MonthlyGame[]) {
-  return Promise.all(
+  const results = await Promise.all(
     games.map(async (game) => {
       try {
-        const official = await lookupOfficialGame(game.title);
-        return (
-          official ?? {
-            ...game,
-            title: (await resolveChineseGameTitle(game.title)) || game.title,
-          }
-        );
+        return await lookupOfficialGame(game.title);
       } catch {
-        return {
-          ...game,
-          title: (await resolveChineseGameTitle(game.title).catch(() => "")) || game.title,
-        };
+        return null;
       }
     }),
   );
+  return {
+    games: results.filter((game): game is OfficialMonthlyGame => Boolean(game)),
+    unresolved: games.filter((_, index) => !results[index]).map((game) => game.title),
+  };
 }
 
-async function lookupOfficialGame(query: string): Promise<MonthlyGame | null> {
+async function lookupOfficialGame(query: string): Promise<OfficialMonthlyGame | null> {
   const url = new URL(graphQlUrl);
   url.searchParams.set("operationName", "getSearchResults");
   url.searchParams.set(
@@ -146,41 +124,44 @@ async function lookupOfficialGame(query: string): Promise<MonthlyGame | null> {
   const products = (payload.data?.universalSearch?.results ?? [])
     .map(asSearchProduct)
     .filter((product): product is StoreProduct => Boolean(product));
-  const ranked = products
-    .map((product) => ({ product, score: productScore(product, query) }))
-    .filter(({ score }) => score >= 80)
-    .sort((left, right) => right.score - left.score);
-  const product = ranked[0]?.product;
+  const product = selectStoreProduct(products, query);
   const productId = product?.id;
   const coverUrl = product ? selectCoverUrl(product) : "";
   if (!product || !productId || !coverUrl) return null;
-  const storedTitle = normalizeStoredGameTitle(product.name || query);
-  const localizedTitle = /[\u3400-\u9fff]/u.test(storedTitle)
-    ? storedTitle
-    : (await resolveChineseGameTitle(query)) || storedTitle;
   return {
-    title: localizedTitle,
+    title: query.trim(),
     coverUrl,
-    officialUrl: `${storeBaseUrl}/${storeLocale}/product/${productId}`,
+    officialUrl: `${storeBaseUrl}/${storeLocale}/product/${encodeURIComponent(productId)}`,
   };
+}
+
+export function selectStoreProduct(products: StoreProduct[], query: string) {
+  return products
+    .map((product) => ({ product, score: productScore(product, query) }))
+    .filter(({ score }) => score >= 80)
+    .sort((left, right) => right.score - left.score)[0]?.product;
 }
 
 function productScore(product: StoreProduct, query: string) {
   if (!product.id || !product.name) return -1000;
   if (!product.platforms?.some((platform) => /^PS[45]$/i.test(platform))) return -1000;
-  if (/demo|trial|add-on|追加内容|体验版|试玩|升级包/i.test(product.name)) return -1000;
+  if (
+    /demo|trial|add-on|追加内容|體驗版|体验版|試玩|试玩|升級包|升级包|digital extras|\bbundle\b|\bpack\b|\bdlc\b|season pass|點數|点数/i.test(
+      product.name,
+    )
+  )
+    return -1000;
   const candidate = comparableTitle(product.name);
   const expected = comparableTitle(query);
   if (!candidate || !expected) return -1000;
-  if (candidate === expected) return 220;
-  const lengthRatio =
-    Math.min(candidate.length, expected.length) / Math.max(candidate.length, expected.length);
-  if (lengthRatio >= 0.72 && (candidate.includes(expected) || expected.includes(candidate)))
-    return 140;
-  const expectedTokens = titleTokens(query);
-  const candidateTokens = titleTokens(product.name);
+  if (candidate === expected) return 240;
+  if (candidate.includes(expected)) return 190;
+  if (expected.includes(candidate) && candidate.length / expected.length >= 0.65) return 170;
+  const expectedTokens = titleTokens(query).filter((token) => token !== "edition");
+  const candidateTokens = titleTokens(product.name).filter((token) => token !== "edition");
   const overlap = expectedTokens.filter((token) => candidateTokens.includes(token)).length;
-  return expectedTokens.length && overlap / expectedTokens.length >= 0.8 ? 90 : 0;
+  const coverage = expectedTokens.length ? overlap / expectedTokens.length : 0;
+  return coverage >= 0.75 ? 100 + Math.round(coverage * 30) : 0;
 }
 
 function titleTokens(value: string) {
@@ -228,6 +209,10 @@ function asSearchProduct(value: unknown): StoreProduct | null {
   return productId ? { ...record, id: productId } : null;
 }
 
+function stripTags(value: string) {
+  return value.replace(/<[^>]+>/g, " ");
+}
+
 function textBetween(value: string, tag: string) {
   return (
     value
@@ -238,12 +223,16 @@ function textBetween(value: string, tag: string) {
   );
 }
 
-function decodeEntities(value: string, stripTags = true) {
+function decodeEntities(value: string, removeMarkup = true) {
   const decoded = value
-    .replace(/&#8211;|&#8212;|&ndash;|&mdash;/g, "–")
-    .replace(/&#8217;|&apos;|&#39;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)));
-  return stripTags ? decoded.replace(/<[^>]+>/g, "") : decoded;
+    .replace(/<!\[CDATA\[|\]\]>/g, "")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#039;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+  return removeMarkup ? stripTags(decoded) : decoded;
 }

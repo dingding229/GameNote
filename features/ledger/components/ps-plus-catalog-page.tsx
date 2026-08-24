@@ -33,7 +33,7 @@ export function PsPlusCatalogPage({
   return (
     <section className="catalog-page">
       <div className="catalog-toolbar">
-        <label className="field">
+        <label className="field catalog-search-field">
           <span>搜索游戏</span>
           <input
             value={catalogQuery}
@@ -41,37 +41,40 @@ export function PsPlusCatalogPage({
             placeholder="名称、PS4、PS5 或会员等级"
           />
         </label>
-        <div className="field catalog-display-field">
-          <span>展示方式</span>
-          <div className="display-mode-switch" role="group" aria-label="PS Plus 展示方式">
-            <button
-              className={displayMode === "grid" ? "active" : ""}
-              type="button"
-              aria-pressed={displayMode === "grid"}
-              onClick={() => onDisplayModeChange("grid")}
-            >
-              网格
-            </button>
-            <button
-              className={displayMode === "list" ? "active" : ""}
-              type="button"
-              aria-pressed={displayMode === "list"}
-              onClick={() => onDisplayModeChange("list")}
-            >
-              列表
-            </button>
+        <div className="catalog-toolbar-actions">
+          <div className="field catalog-display-field">
+            <span>展示方式</span>
+            <div className="display-mode-switch" role="group" aria-label="PS Plus 展示方式">
+              <button
+                className={displayMode === "grid" ? "active" : ""}
+                type="button"
+                aria-pressed={displayMode === "grid"}
+                onClick={() => onDisplayModeChange("grid")}
+              >
+                网格
+              </button>
+              <button
+                className={displayMode === "list" ? "active" : ""}
+                type="button"
+                aria-pressed={displayMode === "list"}
+                onClick={() => onDisplayModeChange("list")}
+              >
+                列表
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="catalog-actions">
           {accessStatus === "unlocked" ? (
-            <button
-              className="primary-button"
-              type="button"
-              disabled={catalogStatus === "loading"}
-              onClick={() => onLoad(true)}
-            >
-              {catalogStatus === "loading" ? "更新中" : "立即更新"}
-            </button>
+            <div className="catalog-actions">
+              <span>官方目录</span>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={catalogStatus === "loading"}
+                onClick={() => onLoad(true)}
+              >
+                {catalogStatus === "loading" ? "更新中…" : "更新目录"}
+              </button>
+            </div>
           ) : null}
         </div>
       </div>
