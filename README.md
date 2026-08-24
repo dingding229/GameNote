@@ -200,14 +200,6 @@ docker logs -f gamenote
 docker stop gamenote
 ```
 
-### 从旧版本升级
-
-- Docker 服务名与容器名已统一为 `gamenote`；首次升级请执行上面的 `docker compose down --remove-orphans`，清理旧的 `switch-ledger` 容器后再启动。
-- 数据库会自动增加会话版本字段，无需手工执行 SQL。
-- 升级后旧版登录 Cookie 会失效，管理员重新登录一次即可。
-- 旧版默认橙色对比度不足时会自动回退为新的深橙色；其他可访问主题色保持不变。
-- 收藏数据与现有 AI、会员、展示设置不会被清空。
-
 ## 数据存储与备份
 
 默认 SQLite 文件位于宿主机：
@@ -221,59 +213,7 @@ docker stop gamenote
 1. 定期在“设置 → 数据备份”中导出 JSON。
 2. 停止容器后复制 `data/records.sqlite`。
 
-JSON 备份可以在设置页面直接导入。SQLite 备份应在容器停止后替换，避免复制写入中的数据库文件。旧版 `records.json` 存在且 SQLite 尚无记录时，应用会尝试自动迁移。
-
-## Debian 12 容器反复重启
-
-旧镜像可能因为 standalone 依赖追踪排除了 Next.js 自身运行库，在日志中出现类似错误后退出：
-
-```text
-Error: Cannot find module '../../lib/picocolors'
-```
-
-当前版本已经移除有问题的追踪排除配置，由 Next.js 自动生成完整 standalone 运行目录，并为镜像增加健康检查。升级时请拉取最新发布镜像并清理旧容器：
-
-```bash
-docker compose down --remove-orphans
-docker compose pull
-docker compose up -d
-docker compose ps
-docker compose logs --tail=100 gamenote
-```
-
-正常状态应显示 `Up ... (healthy)`。如果仍然重启，请先确认 `.env` 中的 `JWT_SECRET` 至少为 32 字节，再把以下命令的完整输出用于排查：
-
-```bash
-docker compose ps
-docker inspect gamenote --format '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}'
-docker compose logs --tail=200 gamenote
-```
-
-## Docker 镜像自动发布
-
-仓库中的 `.github/workflows/publish-docker.yml` 会在以下情况发布镜像：
-
-- 推送到 `main`：发布 `latest` 和 `sha-xxxxxxx` 标签。
-- 推送 `v*` 版本标签：发布语义化版本和 `sha-xxxxxxx` 标签。
-- 在 GitHub Actions 页面手动运行工作流。
-
-镜像同时支持 `linux/amd64` 和 `linux/arm64`，并包含来源证明与 SBOM。首次运行前，在 GitHub 仓库的 `Settings → Secrets and variables → Actions` 中配置：
-
-1. Repository variable `DOCKERHUB_USERNAME`：Docker Hub 用户名，例如 `dingding229`。
-2. Repository secret `DOCKERHUB_TOKEN`：具有 Read & Write 权限的 Docker Hub Personal access token；不要使用账户密码。
-
-首次推送可以自动创建 `gamenote` 仓库，其公开或私有状态取决于 Docker Hub 账号的默认仓库可见性。公开部署前请在 Docker Hub 确认仓库为 Public。
-
-如需固定部署版本，在 `.env` 中指定镜像标签后重新拉取：
-
-```dotenv
-GAMENOTE_IMAGE=dingding229/gamenote:1.0.0
-```
-
-```bash
-docker compose pull
-docker compose up -d
-```
+JSON 备份可以在设置页面直接导入。SQLite 备份应在容器停止后替换，避免复制写入中的数据库文件。
 
 ## 本地开发与质量检查
 
