@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { accessCookieName, createSessionToken, getAccessIdentity } from "@/lib/auth/access";
+import {
+  accessCookieName,
+  createSessionToken,
+  getPasswordChangeIdentity,
+  getSignedInIdentity,
+} from "@/lib/auth/access";
 import {
   createRegisteredUser,
   getRegisteredUser,
   updateRegisteredUserPassword,
 } from "@/lib/ledger/repository";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
-import { isPasswordResetEnabled, verifyPasswordResetToken } from "@/lib/auth/password-reset";
+import {
+  generateTemporaryPassword,
+  removePasswordRecoveryFile,
+  writePasswordRecoveryFile,
+} from "@/lib/auth/password-recovery";
 import {
   checkLoginRateLimit,
   clearFailedLogins,
@@ -21,18 +30,17 @@ type AccessPayload = {
   username?: unknown;
   password?: unknown;
   newPassword?: unknown;
-  resetToken?: unknown;
 };
 
 export async function GET(request: NextRequest) {
   const [identity, owner] = await Promise.all([
-    getAccessIdentity(request).catch(() => null),
+    getSignedInIdentity(request).catch(() => null),
     getRegisteredUser(),
   ]);
   return NextResponse.json({
     authenticated: Boolean(identity),
     registrationOpen: !owner,
-    passwordResetEnabled: Boolean(owner) && isPasswordResetEnabled(),
+    passwordChangeRequired: Boolean(identity && owner?.passwordChangeRequired),
     username: identity?.username || null,
   });
 }
@@ -40,19 +48,40 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const payload = (await request.json().catch(() => ({}))) as AccessPayload;
   const action =
-    payload.action === "register" ? "register" : payload.action === "reset" ? "reset" : "login";
+    payload.action === "register"
+      ? "register"
+      : payload.action === "recover"
+        ? "recover"
+        : payload.action === "complete-recovery"
+          ? "complete-recovery"
+          : "login";
   const username = typeof payload.username === "string" ? payload.username.trim() : "";
-  const password =
-    action === "reset"
-      ? typeof payload.newPassword === "string"
-        ? payload.newPassword
-        : ""
-      : typeof payload.password === "string"
-        ? payload.password
-        : "";
+  const password = typeof payload.password === "string" ? payload.password : "";
+  const newPassword = typeof payload.newPassword === "string" ? payload.newPassword : "";
+
+  if (action === "complete-recovery") {
+    if (!(await getPasswordChangeIdentity(request)))
+      return NextResponse.json({ error: "当前登录不能修改临时密码" }, { status: 401 });
+    if (newPassword.length < 8 || newPassword.length > 128)
+      return NextResponse.json({ error: "新密码需为 8-128 位" }, { status: 400 });
+    try {
+      await removePasswordRecoveryFile();
+    } catch (error) {
+      console.error("删除临时密码文件失败", error);
+      return NextResponse.json(
+        { error: "无法删除临时密码文件，请检查数据目录权限" },
+        { status: 500 },
+      );
+    }
+    await updateRegisteredUserPassword(await hashPassword(newPassword));
+    const response = NextResponse.json({ updated: true, signedOut: true });
+    clearAccessCookie(response, request);
+    return response;
+  }
+
   if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username))
     return NextResponse.json({ error: "账号需为 3-32 位字母、数字或 ._-" }, { status: 400 });
-  if (password.length < 8 || password.length > 128)
+  if (action !== "recover" && (password.length < 8 || password.length > 128))
     return NextResponse.json({ error: "密码需为 8-128 位" }, { status: 400 });
 
   const clientIp =
@@ -66,24 +95,27 @@ export async function POST(request: NextRequest) {
     );
 
   let user = await getRegisteredUser();
-  if (action === "reset") {
-    if (!isPasswordResetEnabled())
-      return NextResponse.json({ error: "服务器尚未启用密码重置码" }, { status: 503 });
-    const resetToken = typeof payload.resetToken === "string" ? payload.resetToken : "";
-    if (!user || user.username !== username || !verifyPasswordResetToken(resetToken)) {
+  if (action === "recover") {
+    if (!user || user.username !== username) {
       recordFailedLogin(rateLimitKey);
-      return NextResponse.json({ error: "账号或密码重置码不正确" }, { status: 401 });
+      return NextResponse.json({ error: "无法为该账号生成临时密码" }, { status: 401 });
     }
-    await updateRegisteredUserPassword(await hashPassword(password));
+    const temporaryPassword = generateTemporaryPassword();
+    const temporaryPasswordHash = await hashPassword(temporaryPassword);
+    try {
+      await writePasswordRecoveryFile(temporaryPassword);
+      await updateRegisteredUserPassword(temporaryPasswordHash, true);
+    } catch (error) {
+      await removePasswordRecoveryFile().catch(() => undefined);
+      console.error("生成临时密码文件失败", error);
+      return NextResponse.json(
+        { error: "无法生成临时密码文件，请检查数据目录权限" },
+        { status: 500 },
+      );
+    }
     clearFailedLogins(rateLimitKey);
-    const response = NextResponse.json({ reset: true });
-    response.cookies.set(accessCookieName, "", {
-      httpOnly: true,
-      maxAge: 0,
-      path: "/",
-      sameSite: "strict",
-      secure: request.nextUrl.protocol === "https:",
-    });
+    const response = NextResponse.json({ recoveryCreated: true, fileName: "password" });
+    clearAccessCookie(response, request);
     return response;
   }
   if (action === "register") {
@@ -93,6 +125,7 @@ export async function POST(request: NextRequest) {
       username,
       passwordHash: await hashPassword(password),
       sessionVersion: 1,
+      passwordChangeRequired: false,
     };
     try {
       await createRegisteredUser(user);
@@ -110,7 +143,11 @@ export async function POST(request: NextRequest) {
 
   clearFailedLogins(rateLimitKey);
 
-  const response = NextResponse.json({ authenticated: true, username: user.username });
+  const response = NextResponse.json({
+    authenticated: true,
+    username: user.username,
+    passwordChangeRequired: user.passwordChangeRequired,
+  });
   response.cookies.set(accessCookieName, await createSessionToken(user), {
     httpOnly: true,
     maxAge: sessionMaxAge,
@@ -130,4 +167,14 @@ export async function DELETE() {
     sameSite: "strict",
   });
   return response;
+}
+
+function clearAccessCookie(response: NextResponse, request: NextRequest) {
+  response.cookies.set(accessCookieName, "", {
+    httpOnly: true,
+    maxAge: 0,
+    path: "/",
+    sameSite: "strict",
+    secure: request.nextUrl.protocol === "https:",
+  });
 }

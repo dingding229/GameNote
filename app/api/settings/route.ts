@@ -9,6 +9,7 @@ import {
   writeAppSettings,
 } from "@/lib/ledger/repository";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { removePasswordRecoveryFile } from "@/lib/auth/password-recovery";
 import { isAccessibleThemeColor } from "@/lib/ui/theme-color";
 
 export const runtime = "nodejs";
@@ -173,6 +174,7 @@ export async function PATCH(request: NextRequest) {
   if (newPassword.length < 8 || newPassword.length > 128)
     return NextResponse.json({ error: "新密码需为 8-128 位" }, { status: 400 });
   await updateRegisteredUserPassword(await hashPassword(newPassword));
+  await removePasswordRecoveryFile().catch((error) => console.error("删除临时密码文件失败", error));
   const response = NextResponse.json({ updated: true, signedOut: true });
   response.cookies.set(accessCookieName, "", {
     httpOnly: true,

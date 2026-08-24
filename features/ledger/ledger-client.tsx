@@ -123,10 +123,9 @@ export default function LedgerClient({
   const [username, setUsername] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [passwordResetEnabled, setPasswordResetEnabled] = useState(false);
-  const [passwordResetMode, setPasswordResetMode] = useState(false);
-  const [passwordResetToken, setPasswordResetToken] = useState("");
-  const [passwordResetNewPassword, setPasswordResetNewPassword] = useState("");
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
+  const [forcedNewPassword, setForcedNewPassword] = useState("");
+  const [forcedConfirmPassword, setForcedConfirmPassword] = useState("");
   const [passwordNotice, setPasswordNotice] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [query, setQuery] = useState("");
@@ -178,9 +177,13 @@ export default function LedgerClient({
   const [catalogVisibleCount, setCatalogVisibleCount] = useState(catalogPageSize);
   const [catalogDisplayMode, setCatalogDisplayMode] = useState<RecordDisplayMode>("grid");
   const [pendingDeleteRecord, setPendingDeleteRecord] = useState<GameRecord | null>(null);
+  const [pendingPasswordRecovery, setPendingPasswordRecovery] = useState(false);
   const shareDialogRef = useDialogAccessibility(shareOpen, closeSharePanel);
   const recognizeDialogRef = useDialogAccessibility(recognizeOpen, () => setRecognizeOpen(false));
-  const authDialogRef = useDialogAccessibility<HTMLFormElement>(authPanelOpen, closeAuthPanel);
+  const authDialogRef = useDialogAccessibility<HTMLFormElement>(
+    authPanelOpen && !pendingPasswordRecovery,
+    requestCloseAuthPanel,
+  );
 
   const loadLedger = useCallback(
     async (authenticated: boolean) => {
@@ -225,13 +228,15 @@ export default function LedgerClient({
       const payload = (await response.json()) as {
         authenticated?: boolean;
         registrationOpen?: boolean;
-        passwordResetEnabled?: boolean;
+        passwordChangeRequired?: boolean;
         username?: string | null;
       };
+      const requiresPasswordChange = Boolean(payload.passwordChangeRequired);
       setRegistrationOpen(Boolean(payload.registrationOpen));
-      setPasswordResetEnabled(Boolean(payload.passwordResetEnabled));
+      setPasswordChangeRequired(requiresPasswordChange);
       setCurrentUsername(payload.username || "");
-      await loadLedger(Boolean(payload.authenticated));
+      if (requiresPasswordChange) setAuthPanelOpen(true);
+      await loadLedger(Boolean(payload.authenticated) && !requiresPasswordChange);
     } catch {
       await loadLedger(false);
     }
@@ -663,38 +668,39 @@ export default function LedgerClient({
   }, [accessStatus, records, recordsDirty, storageReady]);
 
   function openAuthPanel() {
-    setPasswordResetMode(false);
-    setPasswordResetToken("");
-    setPasswordResetNewPassword("");
+    setForcedNewPassword("");
+    setForcedConfirmPassword("");
     setPasswordError("");
     setPasswordNotice("");
     setAuthPanelOpen(true);
   }
 
-  function closeAuthPanel() {
-    setAuthPanelOpen(false);
-    setPasswordResetMode(false);
-    setPasswordResetToken("");
-    setPasswordResetNewPassword("");
-    setPasswordError("");
-    setPasswordNotice("");
+  function requestCloseAuthPanel() {
+    if (!passwordChangeRequired) closeAuthPanel();
   }
 
-  function leavePasswordResetMode() {
-    setPasswordResetMode(false);
-    setPasswordResetToken("");
-    setPasswordResetNewPassword("");
+  function closeAuthPanel() {
+    setAuthPanelOpen(false);
+    setForcedNewPassword("");
+    setForcedConfirmPassword("");
     setPasswordError("");
+    setPasswordNotice("");
   }
 
   async function submitPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (
-      !username.trim() ||
-      (passwordResetMode ? !passwordResetToken || !passwordResetNewPassword : !password)
-    ) {
-      setPasswordError(passwordResetMode ? "请填写账号、重置码和新密码" : "请输入账号和密码");
+    if (passwordChangeRequired) {
+      if (forcedNewPassword.length < 8 || forcedNewPassword.length > 128) {
+        setPasswordError("新密码需为 8-128 位");
+        return;
+      }
+      if (forcedNewPassword !== forcedConfirmPassword) {
+        setPasswordError("两次输入的新密码不一致");
+        return;
+      }
+    } else if (!username.trim() || !password) {
+      setPasswordError("请输入账号和密码");
       return;
     }
 
@@ -706,11 +712,14 @@ export default function LedgerClient({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          action: passwordResetMode ? "reset" : registrationOpen ? "register" : "login",
+          action: passwordChangeRequired
+            ? "complete-recovery"
+            : registrationOpen
+              ? "register"
+              : "login",
           username,
           password,
-          resetToken: passwordResetToken,
-          newPassword: passwordResetNewPassword,
+          newPassword: forcedNewPassword,
         }),
       });
 
@@ -720,22 +729,64 @@ export default function LedgerClient({
         return;
       }
 
-      if (passwordResetMode) {
-        setPasswordResetMode(false);
-        setPasswordResetToken("");
-        setPasswordResetNewPassword("");
+      if (passwordChangeRequired) {
+        setPasswordChangeRequired(false);
+        setForcedNewPassword("");
+        setForcedConfirmPassword("");
         setPassword("");
-        setPasswordNotice("密码已重置，请使用新密码登录");
+        setCurrentUsername("");
+        setPasswordNotice("密码已修改，请使用新密码登录");
+        await loadLedger(false);
         return;
       }
 
+      const payload = (await response.json().catch(() => ({}))) as {
+        passwordChangeRequired?: boolean;
+      };
       setPassword("");
       setCurrentUsername(username.trim());
       setRegistrationOpen(false);
+      if (payload.passwordChangeRequired) {
+        setPasswordChangeRequired(true);
+        setForcedNewPassword("");
+        setForcedConfirmPassword("");
+        await loadLedger(false);
+        return;
+      }
       closeAuthPanel();
       await loadLedger(true);
     } catch {
       setPasswordError("无法验证密码，请稍后重试");
+    }
+  }
+
+  function requestPasswordRecovery() {
+    if (!username.trim()) {
+      setPasswordError("请先填写管理员账号");
+      return;
+    }
+    setPasswordError("");
+    setPendingPasswordRecovery(true);
+  }
+
+  async function confirmPasswordRecovery() {
+    setPendingPasswordRecovery(false);
+    setPasswordError("");
+    setPasswordNotice("正在生成临时密码文件");
+    try {
+      const response = await fetch("/api/access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "recover", username }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "生成临时密码失败");
+      setPassword("");
+      setPasswordNotice("临时密码已写入数据目录下的 password 文件");
+      await loadLedger(false);
+    } catch (error) {
+      setPasswordNotice("");
+      setPasswordError(error instanceof Error ? error.message : "生成临时密码失败");
     }
   }
 
@@ -2404,11 +2455,11 @@ export default function LedgerClient({
                 onConfirm={confirmDeleteRecord}
               />
 
-              {authPanelOpen ? (
+              {authPanelOpen && !pendingPasswordRecovery ? (
                 <div
                   className="share-dialog-backdrop"
                   role="presentation"
-                  onMouseDown={closeAuthPanel}
+                  onMouseDown={requestCloseAuthPanel}
                 >
                   <form
                     ref={authDialogRef}
@@ -2424,69 +2475,66 @@ export default function LedgerClient({
                       <p className="ledger-kicker">
                         {registrationOpen
                           ? "首次使用"
-                          : passwordResetMode
-                            ? "账户恢复"
+                          : passwordChangeRequired
+                            ? "安全验证"
                             : "管理员登录"}
                       </p>
                       <h2 id="auth-dialog-title" className="mt-1 text-2xl font-bold">
                         {registrationOpen
                           ? "注册管理员账号"
-                          : passwordResetMode
-                            ? "重置管理员密码"
+                          : passwordChangeRequired
+                            ? "请设置新密码"
                             : "登录 GameNote"}
                       </h2>
                     </div>
-                    <label className="field">
-                      <span>账号</span>
-                      <input
-                        autoComplete="username"
-                        value={username}
-                        onChange={(event) => setUsername(event.target.value)}
-                        placeholder="3-32 位字母或数字"
-                      />
-                    </label>
-                    {passwordResetMode ? (
+                    {passwordChangeRequired ? (
                       <>
-                        <label className="field">
-                          <span>密码重置码</span>
-                          <input
-                            autoComplete="one-time-code"
-                            type="password"
-                            value={passwordResetToken}
-                            onChange={(event) => setPasswordResetToken(event.target.value)}
-                            placeholder="服务器环境变量中的重置码"
-                          />
-                        </label>
+                        <p className="alert alert-warning py-2 text-sm font-semibold">
+                          当前使用的是临时密码。设置新密码后才能继续管理收藏。
+                        </p>
                         <label className="field">
                           <span>新密码</span>
                           <input
                             autoComplete="new-password"
                             type="password"
-                            value={passwordResetNewPassword}
-                            onChange={(event) => setPasswordResetNewPassword(event.target.value)}
+                            value={forcedNewPassword}
+                            onChange={(event) => setForcedNewPassword(event.target.value)}
                             placeholder="8-128 位"
                           />
                         </label>
-                        {!passwordResetEnabled ? (
-                          <p
-                            className="alert alert-warning py-2 text-sm font-semibold"
-                            role="alert"
-                          >
-                            请先在服务器 .env 配置 GAMENOTE_PASSWORD_RESET_TOKEN 并重启容器。
-                          </p>
-                        ) : null}
+                        <label className="field">
+                          <span>确认新密码</span>
+                          <input
+                            autoComplete="new-password"
+                            type="password"
+                            value={forcedConfirmPassword}
+                            onChange={(event) => setForcedConfirmPassword(event.target.value)}
+                            placeholder="再次输入新密码"
+                          />
+                        </label>
                       </>
                     ) : (
-                      <label className="field">
-                        <span>密码</span>
-                        <input
-                          autoComplete={registrationOpen ? "new-password" : "current-password"}
-                          type="password"
-                          value={password}
-                          onChange={(event) => setPassword(event.target.value)}
-                          placeholder="至少 8 位"
-                        />
-                      </label>
+                      <>
+                        <label className="field">
+                          <span>账号</span>
+                          <input
+                            autoComplete="username"
+                            value={username}
+                            onChange={(event) => setUsername(event.target.value)}
+                            placeholder="3-32 位字母或数字"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>密码</span>
+                          <input
+                            autoComplete={registrationOpen ? "new-password" : "current-password"}
+                            type="password"
+                            value={password}
+                            onChange={(event) => setPassword(event.target.value)}
+                            placeholder="至少 8 位"
+                          />
+                        </label>
+                      </>
                     )}
                     {passwordNotice ? (
                       <p className="alert alert-success py-2 text-sm font-semibold" role="status">
@@ -2498,38 +2546,41 @@ export default function LedgerClient({
                         {passwordError}
                       </p>
                     ) : null}
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className="ghost-button"
-                        type="button"
-                        onClick={passwordResetMode ? leavePasswordResetMode : closeAuthPanel}
-                      >
-                        {passwordResetMode ? "返回登录" : "取消"}
-                      </button>
-                      <button
-                        className="primary-button"
-                        type="submit"
-                        disabled={passwordResetMode && !passwordResetEnabled}
-                      >
-                        {registrationOpen ? "注册并登录" : passwordResetMode ? "重置密码" : "登录"}
+                    <div className={`grid gap-2${passwordChangeRequired ? "" : " grid-cols-2"}`}>
+                      {!passwordChangeRequired ? (
+                        <button className="ghost-button" type="button" onClick={closeAuthPanel}>
+                          取消
+                        </button>
+                      ) : null}
+                      <button className="primary-button" type="submit">
+                        {registrationOpen
+                          ? "注册并登录"
+                          : passwordChangeRequired
+                            ? "保存新密码"
+                            : "登录"}
                       </button>
                     </div>
-                    {!registrationOpen && !passwordResetMode ? (
+                    {!registrationOpen && !passwordChangeRequired ? (
                       <button
                         className="auth-reset-link"
                         type="button"
-                        onClick={() => {
-                          setPasswordResetMode(true);
-                          setPasswordError("");
-                          setPasswordNotice("");
-                        }}
+                        onClick={requestPasswordRecovery}
                       >
-                        忘记密码？
+                        重置密码
                       </button>
                     ) : null}
                   </form>
                 </div>
               ) : null}
+
+              <ConfirmationDialog
+                open={pendingPasswordRecovery}
+                title="生成临时密码？"
+                description="当前密码和所有登录会话将立即失效。临时密码会写入数据目录下的 password 文件。"
+                confirmLabel="确认生成"
+                onCancel={() => setPendingPasswordRecovery(false)}
+                onConfirm={confirmPasswordRecovery}
+              />
             </section>
           ) : (
             <section className="app-surface p-8 text-center text-sm font-semibold text-base-content/70">

@@ -89,6 +89,7 @@ export type AppUser = {
   username: string;
   passwordHash: string;
   sessionVersion: number;
+  passwordChangeRequired: boolean;
 };
 
 export async function getRegisteredUser(): Promise<AppUser | null> {
@@ -97,7 +98,7 @@ export async function getRegisteredUser(): Promise<AppUser | null> {
     ensureUserTable(db);
     const row = db
       .prepare(
-        "SELECT id, username, password_hash, session_version FROM app_users ORDER BY created_at LIMIT 1",
+        "SELECT id, username, password_hash, session_version, password_change_required FROM app_users ORDER BY created_at LIMIT 1",
       )
       .get() as
       | {
@@ -105,6 +106,7 @@ export async function getRegisteredUser(): Promise<AppUser | null> {
           username?: unknown;
           password_hash?: unknown;
           session_version?: unknown;
+          password_change_required?: unknown;
         }
       | undefined;
     if (
@@ -122,6 +124,7 @@ export async function getRegisteredUser(): Promise<AppUser | null> {
         typeof row.session_version === "number" && Number.isInteger(row.session_version)
           ? row.session_version
           : 1,
+      passwordChangeRequired: row.password_change_required === 1,
     };
   } finally {
     db.close();
@@ -134,20 +137,30 @@ export async function createRegisteredUser(user: AppUser) {
     ensureUserTable(db);
     if (db.prepare("SELECT id FROM app_users LIMIT 1").get()) throw new Error("OWNER_EXISTS");
     db.prepare(
-      "INSERT INTO app_users (id, username, password_hash, session_version, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).run(user.id, user.username, user.passwordHash, user.sessionVersion, new Date().toISOString());
+      "INSERT INTO app_users (id, username, password_hash, session_version, password_change_required, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      user.id,
+      user.username,
+      user.passwordHash,
+      user.sessionVersion,
+      user.passwordChangeRequired ? 1 : 0,
+      new Date().toISOString(),
+    );
   } finally {
     db.close();
   }
 }
 
-export async function updateRegisteredUserPassword(passwordHash: string) {
+export async function updateRegisteredUserPassword(
+  passwordHash: string,
+  passwordChangeRequired = false,
+) {
   const { db } = await openLedgerDatabase();
   try {
     ensureUserTable(db);
     db.prepare(
-      "UPDATE app_users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?",
-    ).run(passwordHash, "owner");
+      "UPDATE app_users SET password_hash = ?, session_version = session_version + 1, password_change_required = ? WHERE id = ?",
+    ).run(passwordHash, passwordChangeRequired ? 1 : 0, "owner");
   } finally {
     db.close();
   }
@@ -265,6 +278,7 @@ function ensureUserTable(db: DatabaseSync) {
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       session_version INTEGER NOT NULL DEFAULT 1,
+      password_change_required INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     )`,
   ).run();
@@ -275,6 +289,15 @@ function ensureUserTable(db: DatabaseSync) {
     try {
       db.prepare(
         "ALTER TABLE app_users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1",
+      ).run();
+    } catch (error) {
+      if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+    }
+  }
+  if (!columns?.some((column) => column.name === "password_change_required")) {
+    try {
+      db.prepare(
+        "ALTER TABLE app_users ADD COLUMN password_change_required INTEGER NOT NULL DEFAULT 0",
       ).run();
     } catch (error) {
       if (!String(error).toLowerCase().includes("duplicate column")) throw error;
@@ -523,6 +546,10 @@ function databaseFilePath() {
   }
 
   return defaultDatabaseFilePath();
+}
+
+export function getLedgerDatabaseFilePath() {
+  return databaseFilePath();
 }
 
 function legacyJsonFilePath() {
