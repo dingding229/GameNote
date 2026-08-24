@@ -1,7 +1,71 @@
-import { describe, expect, it } from "vitest";
-import { parsePsPlusMonthlyFeed, selectStoreProduct } from "../lib/game/ps-plus-monthly";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  enrichMonthlyGames,
+  parsePsPlusMonthlyFeed,
+  selectStoreProduct,
+} from "../lib/game/ps-plus-monthly";
+import { findChineseGameTitle, resolveChineseGameTitle } from "../lib/game/title-resolution";
 
 describe("PS Plus monthly feed", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("uses a Chinese display name for monthly games", async () => {
+    await expect(resolveChineseGameTitle("Big Walk")).resolves.toBe("大步走");
+    expect(
+      findChineseGameTitle("Dying Light 2 Stay Human: Reloaded Edition", [
+        {
+          englishTitle: "Dying Light 2 Stay Human",
+          chineseTitle: "消逝的光芒2：保持人性",
+        },
+      ]),
+    ).toBe("消逝的光芒2：保持人性：重装上阵版");
+  });
+
+  it("writes the Chinese title together with Store cover and product URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              universalSearch: {
+                results: [
+                  {
+                    __typename: "Product",
+                    id: "UP3971-PPSA33764_00-WALKWALKWALKWALK",
+                    name: "Big Walk",
+                    platforms: ["PS5"],
+                    media: [
+                      {
+                        role: "MASTER",
+                        type: "IMAGE",
+                        url: "https://image.api.playstation.com/big-walk.jpg",
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(enrichMonthlyGames([{ title: "Big Walk" }])).resolves.toMatchObject({
+      unresolved: [],
+      games: [
+        {
+          title: "大步走",
+          sourceTitle: "Big Walk",
+          coverUrl: "https://image.api.playstation.com/big-walk.jpg?w=960",
+          officialUrl:
+            "https://store.playstation.com/zh-hant-hk/product/UP3971-PPSA33764_00-WALKWALKWALKWALK",
+        },
+      ],
+    });
+  });
+
   it("extracts exact titles without using Blog images or links as game metadata", () => {
     const feed = `
       <rss><channel><item>

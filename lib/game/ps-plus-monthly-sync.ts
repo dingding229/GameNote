@@ -18,8 +18,11 @@ export function reconcileMonthlyGames(
   createId: () => string,
 ): MonthlyReconciliation {
   const monthLabel = `PS Plus 会免 ${month}`;
+  const sourcePrefix = `ps-plus:${month}:`;
   const candidates = records.filter(
-    (record) => record.platform === "PlayStation" && record.notes.includes(monthLabel),
+    (record) =>
+      record.platform === "PlayStation" &&
+      (record.sourceKey?.startsWith(sourcePrefix) || record.notes.includes(monthLabel)),
   );
   const removals = new Set<string>();
   const consumed = new Set<string>();
@@ -30,7 +33,9 @@ export function reconcileMonthlyGames(
   for (const game of games) {
     const matches = candidates.filter(
       (record) =>
-        !removals.has(record.id) && !consumed.has(record.id) && recordMatchesGame(record, game),
+        !removals.has(record.id) &&
+        !consumed.has(record.id) &&
+        recordMatchesGame(record, game, month),
     );
     const existing = matches[0];
     if (!existing) {
@@ -41,12 +46,13 @@ export function reconcileMonthlyGames(
 
     const refreshed = {
       ...existing,
+      sourceKey: monthlySourceKey(month, game),
       title: game.title,
       region: "港版" as const,
       format: "数字版" as const,
       coverUrl: game.coverUrl,
       officialUrl: game.officialUrl,
-      notes: monthlyNotes(month, game.title),
+      notes: monthlyNotes(month),
     };
     if (!recordsEqual(existing, refreshed)) updated += 1;
     replacements.set(existing.id, refreshed);
@@ -73,6 +79,7 @@ function createMonthlyRecord(
 ): GameRecord {
   return {
     id,
+    sourceKey: monthlySourceKey(month, game),
     platform: "PlayStation",
     title: game.title,
     price: 0,
@@ -83,30 +90,44 @@ function createMonthlyRecord(
     seller: "PlayStation Plus",
     coverUrl: game.coverUrl,
     officialUrl: game.officialUrl,
-    notes: monthlyNotes(month, game.title),
+    notes: monthlyNotes(month),
     soldDate: "",
     soldPrice: 0,
     soldCurrency: "CNY",
   };
 }
 
-function monthlyNotes(month: string, title: string) {
-  return `PS Plus 会免 ${month}\n${sourceLabel}${title}`;
+function monthlyNotes(month: string) {
+  return `PS Plus 会免 ${month}`;
 }
 
-function recordMatchesGame(record: GameRecord, game: OfficialMonthlyGame) {
+function recordMatchesGame(record: GameRecord, game: OfficialMonthlyGame, month: string) {
+  if (record.sourceKey === monthlySourceKey(month, game)) {
+    return true;
+  }
   const sourceTitle = record.notes
     .split(/\r?\n/)
     .find((line) => line.startsWith(sourceLabel))
     ?.slice(sourceLabel.length);
-  if (sourceTitle) return normalizeTitle(sourceTitle) === normalizeTitle(game.title);
+  if (sourceTitle) return normalizeTitle(sourceTitle) === normalizeTitle(game.sourceTitle);
 
   // 兼容旧版自动记录：旧解析器可能把平台和正文拼进标题，因此允许完整原名作为前缀。
   const recordTitle = normalizeTitle(record.title);
   const gameTitle = normalizeTitle(game.title);
-  if (recordTitle === gameTitle) return true;
-  if (gameTitle.length >= 6 && recordTitle.startsWith(gameTitle)) return true;
+  const sourceGameTitle = normalizeTitle(game.sourceTitle);
+  if (recordTitle === gameTitle || recordTitle === sourceGameTitle) return true;
+  if (
+    (gameTitle.length >= 6 && recordTitle.startsWith(gameTitle)) ||
+    (sourceGameTitle.length >= 6 && recordTitle.startsWith(sourceGameTitle))
+  )
+    return true;
   return record.officialUrl === game.officialUrl;
+}
+
+function monthlySourceKey(month: string, game: OfficialMonthlyGame) {
+  const productId =
+    game.officialUrl.match(/\/product\/([^/?#]+)/i)?.[1] || normalizeTitle(game.title);
+  return `ps-plus:${month}:${productId}`;
 }
 
 function normalizeTitle(value: string) {

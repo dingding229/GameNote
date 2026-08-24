@@ -4,6 +4,7 @@ import { reconcileMonthlyGames } from "../lib/game/ps-plus-monthly-sync";
 
 const game = {
   title: "Dying Light 2 Stay Human: Reloaded Edition",
+  sourceTitle: "Dying Light 2 Stay Human: Reloaded Edition",
   coverUrl: "https://image.api.playstation.com/dying.jpg",
   officialUrl:
     "https://store.playstation.com/zh-hant-hk/product/UP3050-PPSA02261_00-DL2GAME0000000US",
@@ -48,7 +49,31 @@ describe("PS Plus monthly reconciliation", () => {
       coverUrl: game.coverUrl,
       officialUrl: game.officialUrl,
     });
-    expect(result.records[0].notes).toContain("PS Plus 原名：Dying Light 2");
+    expect(result.records[0].notes).toBe("PS Plus 会免 2026-08");
+    expect(result.records[0].sourceKey).toContain("DL2GAME0000000US");
+  });
+
+  it("migrates an English source marker after the display title becomes Chinese", () => {
+    const oldRecord = {
+      ...record("legacy"),
+      notes: "PS Plus 会免 2026-08\nPS Plus 原名：Dying Light 2 Stay Human: Reloaded Edition",
+      officialUrl: "https://blog.playstation.com/monthly-august/",
+    };
+    const localizedGame = { ...game, title: "消逝的光芒2 人与仁之战：重装上阵版" };
+    const result = reconcileMonthlyGames(
+      [oldRecord],
+      [localizedGame],
+      "2026-08",
+      "2026-08-24",
+      () => "unused",
+    );
+
+    expect(result.additions).toHaveLength(0);
+    expect(result.records[0]).toMatchObject({
+      id: "legacy",
+      title: localizedGame.title,
+      notes: "PS Plus 会免 2026-08",
+    });
   });
 
   it("is idempotent after the first reconciliation", () => {

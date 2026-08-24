@@ -62,6 +62,7 @@ function stripSensitiveSettings(settings: Awaited<ReturnType<typeof readAppSetti
 function stripVolatileRecordFields(record: GameRecord) {
   return {
     id: record.id,
+    ...(record.sourceKey ? { sourceKey: record.sourceKey } : {}),
     platform: record.platform,
     title: record.title,
     price: record.price,

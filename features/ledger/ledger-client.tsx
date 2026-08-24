@@ -859,7 +859,7 @@ export default function LedgerClient({
     if (editingId) {
       setRecords((current) =>
         current.map((record) =>
-          record.id === editingId ? { ...normalized, id: editingId } : record,
+          record.id === editingId ? { ...record, ...normalized, id: editingId } : record,
         ),
       );
     } else {

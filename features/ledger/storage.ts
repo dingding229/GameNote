@@ -63,6 +63,9 @@ export function normalizeImportedRecord(value: unknown): GameRecord | null {
           : "";
   return {
     id: limitText(record.id, ledgerLimits.id) || createId(),
+    ...(typeof record.sourceKey === "string" && record.sourceKey
+      ? { sourceKey: limitText(record.sourceKey, ledgerLimits.id) }
+      : {}),
     platform,
     title: limitText(record.title, ledgerLimits.title),
     price: validLedgerNumber(record.price),

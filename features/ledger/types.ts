@@ -15,6 +15,7 @@ export type MembershipPeriod = {
 
 export type GameRecord = {
   id: string;
+  sourceKey?: string;
   platform: GamePlatform;
   title: string;
   price: number;

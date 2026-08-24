@@ -1,6 +1,10 @@
+import { normalizeStoredGameTitle } from "./title-normalization";
+import { findChineseGameTitle, resolveGameTitles } from "./title-resolution";
+
 export type MonthlyGame = { title: string };
 
 export type OfficialMonthlyGame = MonthlyGame & {
+  sourceTitle: string;
   coverUrl: string;
   officialUrl: string;
 };
@@ -128,8 +132,13 @@ async function lookupOfficialGame(query: string): Promise<OfficialMonthlyGame | 
   const productId = product?.id;
   const coverUrl = product ? selectCoverUrl(product) : "";
   if (!product || !productId || !coverUrl) return null;
+  const storeTitle = normalizeStoredGameTitle(product.name || query);
+  const resolvedTitles = await resolveGameTitles(query);
+  const localizedTitle =
+    findChineseGameTitle(query, resolvedTitles) || findChineseGameTitle(storeTitle, resolvedTitles);
   return {
-    title: query.trim(),
+    title: localizedTitle || storeTitle,
+    sourceTitle: query.trim(),
     coverUrl,
     officialUrl: `${storeBaseUrl}/${storeLocale}/product/${encodeURIComponent(productId)}`,
   };

@@ -11,6 +11,7 @@ export type Currency = "CNY" | "JPY" | "HKD" | "USD" | "EUR" | "BRL";
 
 export type GameRecord = {
   id: string;
+  sourceKey?: string;
   platform: GamePlatform;
   title: string;
   price: number;
@@ -131,6 +132,9 @@ export function normalizeRecord(value: unknown): GameRecord | null {
 
   return {
     id: limitText(record.id, ledgerLimits.id) || createId(),
+    ...(typeof record.sourceKey === "string" && record.sourceKey
+      ? { sourceKey: limitText(record.sourceKey, ledgerLimits.id) }
+      : {}),
     platform,
     title: normalizeStoredGameTitle(
       limitText(
