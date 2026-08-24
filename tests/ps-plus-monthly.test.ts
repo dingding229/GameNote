@@ -149,11 +149,49 @@ describe("PS Plus monthly feed", () => {
     );
   });
 
+  it("matches a traditional Chinese Store title with a simplified Chinese alias", () => {
+    const products = [
+      {
+        __typename: "Product",
+        id: "wuchang",
+        name: "明末：淵虛之羽 (簡體中文, 繁體中文)",
+        platforms: ["PS5"],
+      },
+    ];
+    expect(selectStoreProduct(products, "Wuchang: Fallen Feathers", ["明末：渊虚之羽"])?.id).toBe(
+      "wuchang",
+    );
+  });
+
   it("ignores catalog posts and non-current monthly posts", () => {
     const feed = `<rss><channel>
       <item><title>PlayStation Plus Game Catalog for August: Alpha</title></item>
       <item><title>PlayStation Plus Monthly Games for July: Bravo</title></item>
     </channel></rss>`;
     expect(parsePsPlusMonthlyFeed(feed, new Date("2026-08-24T00:00:00Z"))).toBeNull();
+  });
+
+  it("selects the requested historical year when RSS search returns repeated month names", () => {
+    const feed = `<rss><channel>
+      <item>
+        <title>PlayStation Plus Monthly Games for May: Old One, Old Two and Old Three</title>
+        <pubDate>Tue, 02 May 2023 10:00:00 +0000</pubDate>
+        <content:encoded><![CDATA[<h2>Old One | PS5</h2>]]></content:encoded>
+      </item>
+      <item>
+        <title>PlayStation Plus Monthly Games for May: New One, New Two and New Three</title>
+        <pubDate>Thu, 30 Apr 2026 10:00:00 +0000</pubDate>
+        <content:encoded><![CDATA[
+          <h2>New One | PS5</h2><h2>New Two | PS4</h2><h2>New Three | PS5</h2>
+        ]]></content:encoded>
+      </item>
+    </channel></rss>`;
+
+    expect(parsePsPlusMonthlyFeed(feed, new Date("2026-08-24T00:00:00Z"), "2026-05")).toMatchObject(
+      {
+        month: "2026-05",
+        games: [{ title: "New One" }, { title: "New Two" }, { title: "New Three" }],
+      },
+    );
   });
 });

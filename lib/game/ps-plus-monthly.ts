@@ -1,4 +1,4 @@
-import { normalizeStoredGameTitle } from "./title-normalization";
+import { normalizeStoredGameTitle, toSimplifiedChinese } from "./title-normalization";
 import { findChineseGameTitle, resolveGameTitles } from "./title-resolution";
 
 export type MonthlyGame = { title: string };
@@ -31,9 +31,20 @@ const storeLocale = "zh-hant-hk";
 const graphQlUrl = "https://web.np.playstation.com/api/graphql/v1/op";
 const searchHash = "4df6284f982e57bec70f23c77e2c219dc792eb19af7fb3d3a81767aa3f1958aa";
 
-export function parsePsPlusMonthlyFeed(xml: string, now = new Date()): MonthlyGames | null {
+export function parsePsPlusMonthlyFeed(
+  xml: string,
+  now = new Date(),
+  requestedMonth = "",
+): MonthlyGames | null {
   const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
-  const currentMonth = now.toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+  const target = parseRequestedMonth(requestedMonth, now);
+  const currentMonth = new Date(Date.UTC(target.year, target.monthIndex, 1)).toLocaleString(
+    "en-US",
+    {
+      month: "long",
+      timeZone: "UTC",
+    },
+  );
 
   for (const match of items) {
     const item = match[1];
@@ -42,12 +53,15 @@ export function parsePsPlusMonthlyFeed(xml: string, now = new Date()): MonthlyGa
       continue;
     const monthName = rawTitle.match(/Monthly Games for ([A-Za-z]+)/i)?.[1];
     if (!monthName || monthName.toLowerCase() !== currentMonth.toLowerCase()) continue;
+    const publishedAt = new Date(decodeEntities(textBetween(item, "pubDate")));
+    if (requestedMonth && !articleDateMatchesMonth(publishedAt, target.year, target.monthIndex))
+      continue;
     const articleUrl = decodeEntities(textBetween(item, "link"));
     const content = decodeEntities(textBetween(item, "content:encoded"), false);
     const sectionTitles = extractGameTitles(content);
     const titles = sectionTitles.length ? sectionTitles : extractHeadlineTitles(rawTitle);
     if (!titles.length) continue;
-    const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    const month = `${target.year}-${String(target.monthIndex + 1).padStart(2, "0")}`;
     return {
       month,
       url: articleUrl,
@@ -55,6 +69,21 @@ export function parsePsPlusMonthlyFeed(xml: string, now = new Date()): MonthlyGa
     };
   }
   return null;
+}
+
+function parseRequestedMonth(value: string, fallback: Date) {
+  const match = value.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  return match
+    ? { year: Number(match[1]), monthIndex: Number(match[2]) - 1 }
+    : { year: fallback.getUTCFullYear(), monthIndex: fallback.getUTCMonth() };
+}
+
+function articleDateMatchesMonth(date: Date, year: number, monthIndex: number) {
+  if (!Number.isFinite(date.getTime())) return false;
+  const monthStart = Date.UTC(year, monthIndex, 1);
+  const earliestAnnouncement = monthStart - 45 * 24 * 60 * 60 * 1000;
+  const latestAnnouncement = monthStart + 15 * 24 * 60 * 60 * 1000;
+  return date.getTime() >= earliestAnnouncement && date.getTime() <= latestAnnouncement;
 }
 
 function extractGameTitles(content: string) {
@@ -92,6 +121,40 @@ export async function enrichMonthlyGames(games: MonthlyGame[]) {
 }
 
 async function lookupOfficialGame(query: string): Promise<OfficialMonthlyGame | null> {
+  const resolvedTitles = await resolveGameTitles(query);
+  const searchVariants = [
+    query,
+    ...resolvedTitles.flatMap((title) => [title.chineseTitle, title.englishTitle]),
+  ]
+    .map((title) => title.trim())
+    .filter((title, index, titles) => Boolean(title) && titles.indexOf(title) === index)
+    .slice(0, 4);
+  const products: StoreProduct[] = [];
+  let product: StoreProduct | undefined;
+  for (const variant of searchVariants) {
+    try {
+      products.push(...(await searchStoreProducts(variant)));
+      product = selectStoreProduct(products, query, searchVariants);
+      if (product && selectCoverUrl(product)) break;
+    } catch {
+      // Continue with the next localized search variant.
+    }
+  }
+  const productId = product?.id;
+  const coverUrl = product ? selectCoverUrl(product) : "";
+  if (!product || !productId || !coverUrl) return null;
+  const storeTitle = normalizeStoredGameTitle(product.name || query);
+  const localizedTitle =
+    findChineseGameTitle(query, resolvedTitles) || findChineseGameTitle(storeTitle, resolvedTitles);
+  return {
+    title: localizedTitle || storeTitle,
+    sourceTitle: query.trim(),
+    coverUrl,
+    officialUrl: `${storeBaseUrl}/${storeLocale}/product/${encodeURIComponent(productId)}`,
+  };
+}
+
+async function searchStoreProducts(query: string) {
   const url = new URL(graphQlUrl);
   url.searchParams.set("operationName", "getSearchResults");
   url.searchParams.set(
@@ -121,32 +184,21 @@ async function lookupOfficialGame(query: string): Promise<OfficialMonthlyGame | 
     },
     signal: AbortSignal.timeout(12_000),
   });
-  if (!response.ok) return null;
+  if (!response.ok) return [];
   const payload = (await response.json()) as {
     data?: { universalSearch?: { results?: unknown[] } };
   };
-  const products = (payload.data?.universalSearch?.results ?? [])
+  return (payload.data?.universalSearch?.results ?? [])
     .map(asSearchProduct)
     .filter((product): product is StoreProduct => Boolean(product));
-  const product = selectStoreProduct(products, query);
-  const productId = product?.id;
-  const coverUrl = product ? selectCoverUrl(product) : "";
-  if (!product || !productId || !coverUrl) return null;
-  const storeTitle = normalizeStoredGameTitle(product.name || query);
-  const resolvedTitles = await resolveGameTitles(query);
-  const localizedTitle =
-    findChineseGameTitle(query, resolvedTitles) || findChineseGameTitle(storeTitle, resolvedTitles);
-  return {
-    title: localizedTitle || storeTitle,
-    sourceTitle: query.trim(),
-    coverUrl,
-    officialUrl: `${storeBaseUrl}/${storeLocale}/product/${encodeURIComponent(productId)}`,
-  };
 }
 
-export function selectStoreProduct(products: StoreProduct[], query: string) {
+export function selectStoreProduct(products: StoreProduct[], query: string, aliases = [query]) {
   return products
-    .map((product) => ({ product, score: productScore(product, query) }))
+    .map((product) => ({
+      product,
+      score: Math.max(...[query, ...aliases].map((alias) => productScore(product, alias))),
+    }))
     .filter(({ score }) => score >= 80)
     .sort((left, right) => right.score - left.score)[0]?.product;
 }
@@ -174,7 +226,7 @@ function productScore(product: StoreProduct, query: string) {
 }
 
 function titleTokens(value: string) {
-  return value
+  return toSimplifiedChinese(value)
     .toLowerCase()
     .replace(/[™®©]/g, "")
     .split(/[^a-z0-9\u3400-\u9fff]+/u)

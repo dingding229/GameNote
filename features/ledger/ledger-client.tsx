@@ -1786,6 +1786,7 @@ export default function LedgerClient({
                   psPlusStatus={psPlusStatus}
                   onSubmit={saveSettings}
                   onSyncPsPlus={() => syncPsPlusGames(false)}
+                  onHistoryCompleted={() => loadLedger(true)}
                 />
               ) : null}
 

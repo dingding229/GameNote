@@ -8,6 +8,7 @@ import type {
   VersionInfo,
 } from "../types";
 import { ModelCombobox } from "./model-combobox";
+import { PsPlusHistory } from "./ps-plus-history";
 
 type SettingsUpdater = Dispatch<SetStateAction<SettingsState>>;
 
@@ -337,6 +338,7 @@ type MembershipPageProps = {
   psPlusStatus: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onSyncPsPlus: () => void;
+  onHistoryCompleted: () => Promise<void>;
 };
 
 export function MembershipPage({
@@ -346,6 +348,7 @@ export function MembershipPage({
   psPlusStatus,
   onSubmit,
   onSyncPsPlus,
+  onHistoryCompleted,
 }: MembershipPageProps) {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -439,6 +442,12 @@ export function MembershipPage({
                   {psPlusStatus}
                 </p>
               ) : null}
+              <PsPlusHistory
+                periods={settings.membershipPeriods.filter(
+                  (period) => period.service === "PlayStation Plus",
+                )}
+                onCompleted={onHistoryCompleted}
+              />
             </>
           ) : null}
         </MembershipPeriodSection>

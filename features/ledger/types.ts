@@ -107,6 +107,14 @@ export type PsPlusCatalog = {
   stale?: boolean;
 };
 
+export type HistoricalMonthlyGame = {
+  title: string;
+  sourceTitle: string;
+  coverUrl: string;
+  officialUrl: string;
+  alreadyAdded: boolean;
+};
+
 export type NintendoCoverResult = {
   id: string;
   title: string;

@@ -2,9 +2,9 @@
 
 GameNote 是一个面向个人部署的游戏收藏与购买记录应用，支持 Nintendo Switch、PlayStation、PS Plus 游戏目录、会员记录、价格统计、JSON 备份和 AI 订单截图识别。
 
-当前稳定版本：`1.0.5`。正式版本使用 `v主版本.次版本.修订版本` Git 标签发布。
+当前稳定版本：`1.0.6`。正式版本使用 `v主版本.次版本.修订版本` Git 标签发布。
 
-Docker Hub 只保留两类标签：`latest` 始终指向最新稳定版，`1.0.5` 这类完整版本号永久固定到对应版本。不再发布 `1.0`、`1` 或 `sha-*` 标签。生产环境建议固定完整版本号，需要升级时再明确修改。
+Docker Hub 只保留两类标签：`latest` 始终指向最新稳定版，`1.0.6` 这类完整版本号永久固定到对应版本。不再发布 `1.0`、`1` 或 `sha-*` 标签。生产环境建议固定完整版本号，需要升级时再明确修改。
 
 应用采用 Next.js、React、TypeScript 与 SQLite 构建，默认通过 Docker Compose 部署。Docker 镜像由 GitHub Actions 自动构建并发布到 Docker Hub。游客可以只读浏览收藏，管理员登录后才能修改数据和使用管理工具。
 
@@ -32,6 +32,7 @@ Docker Hub 只保留两类标签：`latest` 始终指向最新稳定版，`1.0.5
 - PS Plus 目录使用 SQLite 缓存，默认每 12 小时后台刷新一次；管理员可以手动刷新。
 - PlayStation Plus 和 Nintendo Switch Online 按起止时间记录会员周期、购买价格及币种，过期记录会保留。
 - 可从 PlayStation Blog 识别本月 PS Plus 会免阵容，再按准确游戏名从港区 PlayStation Store 获取官方页面与封面，去重后加入收藏。
+- 历史会免补录会根据已保存的 PS Plus 会员时间段列出过往月份，预览该月阵容后可勾选实际领取过的游戏批量入库。
 
 ### AI 购买截图识别
 
@@ -118,7 +119,7 @@ services:
 
 | 环境变量                        | 是否必需 | 默认值                        | 说明                                                           |
 | ------------------------------- | :------: | ----------------------------- | -------------------------------------------------------------- |
-| `GAMENOTE_IMAGE`                |    否    | `dingding229/gamenote:latest` | Docker Hub 镜像；建议固定到 `1.0.5` 等完整正式版本标签。       |
+| `GAMENOTE_IMAGE`                |    否    | `dingding229/gamenote:latest` | Docker Hub 镜像；建议固定到 `1.0.6` 等完整正式版本标签。       |
 | `JWT_SECRET`                    |    是    | 无                            | JWT 会话签名密钥，生产环境至少 32 字节。修改后现有会话会失效。 |
 | `APP_DATABASE_FILE`             |    否    | `/data/records.sqlite`        | SQLite 数据库文件路径，Docker 配置已经写入。                   |
 | `PS_PLUS_CATALOG_REFRESH_HOURS` |    否    | `12`                          | PS Plus 游戏目录缓存刷新间隔，单位为小时。                     |
