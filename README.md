@@ -71,22 +71,17 @@ GameNote 是一个面向个人部署的游戏收藏与购买记录应用，支�
 
 ## 快速部署
 
-要求：Docker Engine 与 Docker Compose。
+要求：Docker Engine、Docker Compose、`curl` 与 `openssl`。部署只会从 Docker Hub 拉取预构建镜像，不需要在服务器安装 Node.js、下载源码或执行本地构建。
 
 ```bash
-git clone https://github.com/dingding229/GameNote.git
-cd GameNote
-cp .env.example .env
-openssl rand -base64 48
+mkdir -p gamenote/data
+cd gamenote
+curl -fsSLO https://raw.githubusercontent.com/dingding229/GameNote/main/docker-compose.yml
+umask 077
+printf 'JWT_SECRET=%s\n' "$(openssl rand -base64 48)" > .env
 ```
 
-将最后一条命令输出的随机值填入 `.env`：
-
-```dotenv
-JWT_SECRET=在这里填写独立随机值
-```
-
-不要提交真实的 `.env` 或 JWT 密钥。随后拉取镜像并启动：
+随后拉取镜像并启动：
 
 ```bash
 docker compose pull
@@ -95,9 +90,9 @@ docker compose up -d
 
 浏览器访问 `http://localhost:3000`。第一次访问时点击“注册管理员”，然后进入设置页面配置游戏库、会员信息及 AI 服务。
 
-## Docker Compose 配置
+## Docker Compose 镜像安装
 
-仓库默认配置：
+`docker-compose.yml` 直接使用 Docker Hub 镜像，不包含 `build` 配置：
 
 ```yaml
 services:
@@ -131,11 +126,37 @@ services:
 
 它们均由管理员在应用设置中维护，并保存在 SQLite 中。
 
-## 更新、日志与停止
+## Docker Run 镜像安装
+
+不使用 Docker Compose 时，可以直接运行同一个镜像：
 
 ```bash
-# 拉取代码中的最新部署配置与 Docker Hub 镜像
-git pull
+mkdir -p gamenote/data
+cd gamenote
+umask 077
+printf 'JWT_SECRET=%s\n' "$(openssl rand -base64 48)" > .env
+
+docker pull dingding229/gamenote:latest
+docker run -d \
+  --name gamenote \
+  --restart unless-stopped \
+  --init \
+  -p 3000:3000 \
+  --env-file .env \
+  -e APP_DATABASE_FILE=/data/records.sqlite \
+  -e PS_PLUS_CATALOG_REFRESH_HOURS=12 \
+  -v "$(pwd)/data:/data" \
+  dingding229/gamenote:latest
+```
+
+容器使用宿主机当前目录下的 `data` 文件夹持久化 SQLite 数据。删除或重建容器不会删除该文件夹。
+
+## 更新、日志与停止
+
+### Docker Compose
+
+```bash
+# 更新镜像并重建容器，保留 data 数据
 docker compose pull
 docker compose up -d --remove-orphans
 
@@ -144,6 +165,39 @@ docker compose logs -f gamenote
 
 # 停止服务但保留数据
 docker compose down
+```
+
+如果需要同步最新版 Compose 配置，可以在部署目录重新下载：
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/dingding229/GameNote/main/docker-compose.yml
+```
+
+### Docker Run
+
+```bash
+# 更新镜像并重建容器，保留 data 数据
+docker pull dingding229/gamenote:latest
+docker stop gamenote
+docker rm gamenote
+
+docker run -d \
+  --name gamenote \
+  --restart unless-stopped \
+  --init \
+  -p 3000:3000 \
+  --env-file .env \
+  -e APP_DATABASE_FILE=/data/records.sqlite \
+  -e PS_PLUS_CATALOG_REFRESH_HOURS=12 \
+  -v "$(pwd)/data:/data" \
+  dingding229/gamenote:latest
+
+# 查看状态和日志
+docker inspect gamenote --format '{{.State.Status}} {{.State.Health.Status}}'
+docker logs -f gamenote
+
+# 停止服务但保留数据
+docker stop gamenote
 ```
 
 ### 从旧版本升级
@@ -177,10 +231,9 @@ JSON 备份可以在设置页面直接导入。SQLite 备份应在容器停止�
 Error: Cannot find module '../../lib/picocolors'
 ```
 
-当前版本已经移除有问题的追踪排除配置，由 Next.js 自动生成完整 standalone 运行目录，并为镜像增加健康检查。升级时请强制拉取基础镜像并清理旧构建缓存：
+当前版本已经移除有问题的追踪排除配置，由 Next.js 自动生成完整 standalone 运行目录，并为镜像增加健康检查。升级时请拉取最新发布镜像并清理旧容器：
 
 ```bash
-git pull
 docker compose down --remove-orphans
 docker compose pull
 docker compose up -d
