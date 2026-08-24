@@ -9,6 +9,7 @@ services:
     environment:
       PS_PLUS_CATALOG_REFRESH_HOURS: ${PS_PLUS_CATALOG_REFRESH_HOURS:-12}
       JWT_SECRET: ${JWT_SECRET:?请复制 .env.example 为 .env，并配置 JWT_SECRET}
+      GAMENOTE_PASSWORD_RESET_TOKEN: ${GAMENOTE_PASSWORD_RESET_TOKEN:-}
       APP_DATABASE_FILE: "/data/records.sqlite"
     volumes:
       - ./data:/data

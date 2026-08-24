@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { accessCookieName, createSessionToken, getAccessIdentity } from "@/lib/auth/access";
-import { createRegisteredUser, getRegisteredUser } from "@/lib/ledger/repository";
+import {
+  createRegisteredUser,
+  getRegisteredUser,
+  updateRegisteredUserPassword,
+} from "@/lib/ledger/repository";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { isPasswordResetEnabled, verifyPasswordResetToken } from "@/lib/auth/password-reset";
 import {
   checkLoginRateLimit,
   clearFailedLogins,
@@ -11,7 +16,13 @@ import {
 
 export const runtime = "nodejs";
 const sessionMaxAge = 60 * 60 * 24 * 30;
-type AccessPayload = { action?: unknown; username?: unknown; password?: unknown };
+type AccessPayload = {
+  action?: unknown;
+  username?: unknown;
+  password?: unknown;
+  newPassword?: unknown;
+  resetToken?: unknown;
+};
 
 export async function GET(request: NextRequest) {
   const [identity, owner] = await Promise.all([
@@ -21,15 +32,24 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     authenticated: Boolean(identity),
     registrationOpen: !owner,
+    passwordResetEnabled: Boolean(owner) && isPasswordResetEnabled(),
     username: identity?.username || null,
   });
 }
 
 export async function POST(request: NextRequest) {
   const payload = (await request.json().catch(() => ({}))) as AccessPayload;
-  const action = payload.action === "register" ? "register" : "login";
+  const action =
+    payload.action === "register" ? "register" : payload.action === "reset" ? "reset" : "login";
   const username = typeof payload.username === "string" ? payload.username.trim() : "";
-  const password = typeof payload.password === "string" ? payload.password : "";
+  const password =
+    action === "reset"
+      ? typeof payload.newPassword === "string"
+        ? payload.newPassword
+        : ""
+      : typeof payload.password === "string"
+        ? payload.password
+        : "";
   if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username))
     return NextResponse.json({ error: "账号需为 3-32 位字母、数字或 ._-" }, { status: 400 });
   if (password.length < 8 || password.length > 128)
@@ -46,6 +66,26 @@ export async function POST(request: NextRequest) {
     );
 
   let user = await getRegisteredUser();
+  if (action === "reset") {
+    if (!isPasswordResetEnabled())
+      return NextResponse.json({ error: "服务器尚未启用密码重置码" }, { status: 503 });
+    const resetToken = typeof payload.resetToken === "string" ? payload.resetToken : "";
+    if (!user || user.username !== username || !verifyPasswordResetToken(resetToken)) {
+      recordFailedLogin(rateLimitKey);
+      return NextResponse.json({ error: "账号或密码重置码不正确" }, { status: 401 });
+    }
+    await updateRegisteredUserPassword(await hashPassword(password));
+    clearFailedLogins(rateLimitKey);
+    const response = NextResponse.json({ reset: true });
+    response.cookies.set(accessCookieName, "", {
+      httpOnly: true,
+      maxAge: 0,
+      path: "/",
+      sameSite: "strict",
+      secure: request.nextUrl.protocol === "https:",
+    });
+    return response;
+  }
   if (action === "register") {
     if (user) return NextResponse.json({ error: "管理员账号已注册" }, { status: 409 });
     user = {

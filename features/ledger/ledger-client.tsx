@@ -5,7 +5,9 @@ import { normalizeChineseSearchText } from "@/lib/game/title-normalization";
 import { ledgerLimits } from "@/lib/ledger/limits";
 import { defaultThemeColor, themeColorContent } from "@/lib/ui/theme-color";
 import { appVersion } from "@/lib/version";
+import { isFrozenPsPlusRecord } from "@/lib/game/ps-plus-record";
 import { AppToolbar, Stat } from "./components/app-toolbar";
+import { ConfirmationDialog } from "./components/confirmation-dialog";
 import {
   catalogPageSize,
   currencies,
@@ -121,6 +123,11 @@ export default function LedgerClient({
   const [username, setUsername] = useState("");
   const [currentUsername, setCurrentUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordResetEnabled, setPasswordResetEnabled] = useState(false);
+  const [passwordResetMode, setPasswordResetMode] = useState(false);
+  const [passwordResetToken, setPasswordResetToken] = useState("");
+  const [passwordResetNewPassword, setPasswordResetNewPassword] = useState("");
+  const [passwordNotice, setPasswordNotice] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"date" | "price" | "title">("date");
@@ -170,11 +177,10 @@ export default function LedgerClient({
   const [catalogError, setCatalogError] = useState("");
   const [catalogVisibleCount, setCatalogVisibleCount] = useState(catalogPageSize);
   const [catalogDisplayMode, setCatalogDisplayMode] = useState<RecordDisplayMode>("grid");
+  const [pendingDeleteRecord, setPendingDeleteRecord] = useState<GameRecord | null>(null);
   const shareDialogRef = useDialogAccessibility(shareOpen, closeSharePanel);
   const recognizeDialogRef = useDialogAccessibility(recognizeOpen, () => setRecognizeOpen(false));
-  const authDialogRef = useDialogAccessibility<HTMLFormElement>(authPanelOpen, () =>
-    setAuthPanelOpen(false),
-  );
+  const authDialogRef = useDialogAccessibility<HTMLFormElement>(authPanelOpen, closeAuthPanel);
 
   const loadLedger = useCallback(
     async (authenticated: boolean) => {
@@ -219,9 +225,11 @@ export default function LedgerClient({
       const payload = (await response.json()) as {
         authenticated?: boolean;
         registrationOpen?: boolean;
+        passwordResetEnabled?: boolean;
         username?: string | null;
       };
       setRegistrationOpen(Boolean(payload.registrationOpen));
+      setPasswordResetEnabled(Boolean(payload.passwordResetEnabled));
       setCurrentUsername(payload.username || "");
       await loadLedger(Boolean(payload.authenticated));
     } catch {
@@ -654,24 +662,55 @@ export default function LedgerClient({
     return () => window.clearTimeout(timeoutId);
   }, [accessStatus, records, recordsDirty, storageReady]);
 
+  function openAuthPanel() {
+    setPasswordResetMode(false);
+    setPasswordResetToken("");
+    setPasswordResetNewPassword("");
+    setPasswordError("");
+    setPasswordNotice("");
+    setAuthPanelOpen(true);
+  }
+
+  function closeAuthPanel() {
+    setAuthPanelOpen(false);
+    setPasswordResetMode(false);
+    setPasswordResetToken("");
+    setPasswordResetNewPassword("");
+    setPasswordError("");
+    setPasswordNotice("");
+  }
+
+  function leavePasswordResetMode() {
+    setPasswordResetMode(false);
+    setPasswordResetToken("");
+    setPasswordResetNewPassword("");
+    setPasswordError("");
+  }
+
   async function submitPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!username.trim() || !password) {
-      setPasswordError("请输入账号和密码");
+    if (
+      !username.trim() ||
+      (passwordResetMode ? !passwordResetToken || !passwordResetNewPassword : !password)
+    ) {
+      setPasswordError(passwordResetMode ? "请填写账号、重置码和新密码" : "请输入账号和密码");
       return;
     }
 
     setPasswordError("");
+    setPasswordNotice("");
 
     try {
       const response = await fetch("/api/access", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          action: registrationOpen ? "register" : "login",
+          action: passwordResetMode ? "reset" : registrationOpen ? "register" : "login",
           username,
           password,
+          resetToken: passwordResetToken,
+          newPassword: passwordResetNewPassword,
         }),
       });
 
@@ -681,10 +720,19 @@ export default function LedgerClient({
         return;
       }
 
+      if (passwordResetMode) {
+        setPasswordResetMode(false);
+        setPasswordResetToken("");
+        setPasswordResetNewPassword("");
+        setPassword("");
+        setPasswordNotice("密码已重置，请使用新密码登录");
+        return;
+      }
+
       setPassword("");
       setCurrentUsername(username.trim());
       setRegistrationOpen(false);
-      setAuthPanelOpen(false);
+      closeAuthPanel();
       await loadLedger(true);
     } catch {
       setPasswordError("无法验证密码，请稍后重试");
@@ -742,6 +790,7 @@ export default function LedgerClient({
               record.seller,
               record.notes,
               record.soldDate ? "已卖出" : "持有中",
+              isFrozenPsPlusRecord(record, settings.psPlusEnabled) ? "PS Plus 会员冻结" : "",
             ].join(" "),
             normalizedQuery,
           ),
@@ -749,8 +798,10 @@ export default function LedgerClient({
       : matchingRecords;
 
     return [...source].sort((a, b) => {
-      const soldOrder = Number(Boolean(a.soldDate)) - Number(Boolean(b.soldDate));
-      if (soldOrder !== 0) return soldOrder;
+      const inactiveOrder =
+        Number(Boolean(a.soldDate) || isFrozenPsPlusRecord(a, settings.psPlusEnabled)) -
+        Number(Boolean(b.soldDate) || isFrozenPsPlusRecord(b, settings.psPlusEnabled));
+      if (inactiveOrder !== 0) return inactiveOrder;
 
       if (sortBy === "price") {
         return (
@@ -765,7 +816,15 @@ export default function LedgerClient({
 
       return new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime();
     });
-  }, [exchangeRates, formatFilter, platformRecords, query, regionFilter, sortBy]);
+  }, [
+    exchangeRates,
+    formatFilter,
+    platformRecords,
+    query,
+    regionFilter,
+    settings.psPlusEnabled,
+    sortBy,
+  ]);
 
   const switchCount = records.filter((record) => record.platform === "Nintendo Switch").length;
   const playStationCount = records.length - switchCount;
@@ -954,10 +1013,17 @@ export default function LedgerClient({
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function deleteRecord(recordId: string) {
+  function requestDeleteRecord(record: GameRecord) {
+    setPendingDeleteRecord(record);
+  }
+
+  function confirmDeleteRecord() {
+    if (!pendingDeleteRecord) return;
+    const recordId = pendingDeleteRecord.id;
     setRecords((current) => current.filter((record) => record.id !== recordId));
     setRecordsDirty(true);
     setSaveStatus("saving");
+    setPendingDeleteRecord(null);
     if (editingId === recordId) {
       resetForm();
     }
@@ -1342,7 +1408,7 @@ export default function LedgerClient({
               <>
                 <strong>访客</strong>
                 <small>只读浏览</small>
-                <button type="button" onClick={() => setAuthPanelOpen(true)}>
+                <button type="button" onClick={openAuthPanel}>
                   {registrationOpen ? "注册管理员" : "管理员登录"}
                 </button>
               </>
@@ -1412,7 +1478,7 @@ export default function LedgerClient({
                   username={currentUsername}
                   version={versionInfo.currentVersion}
                   updateAvailable={versionInfo.updateAvailable}
-                  onLogin={() => setAuthPanelOpen(true)}
+                  onLogin={openAuthPanel}
                   onLogout={lockLedger}
                   onSettings={() => switchView("settings")}
                 />
@@ -1895,7 +1961,7 @@ export default function LedgerClient({
                       recordDisplayMode === "grid" ? (
                         <article
                           key={record.id}
-                          className={`record-card flex h-full flex-col overflow-hidden${record.soldDate ? " sold-record" : ""}`}
+                          className={`record-card flex h-full flex-col overflow-hidden${record.soldDate || isFrozenPsPlusRecord(record, settings.psPlusEnabled) ? " sold-record" : ""}`}
                         >
                           <div className="record-cover relative bg-primary">
                             {record.coverUrl ? (
@@ -1914,7 +1980,11 @@ export default function LedgerClient({
                             )}
                             <div className="image-badge absolute left-3 top-3">{record.region}</div>
                             <div className="image-badge alt absolute right-3 top-3">
-                              {record.soldDate ? "已卖出" : record.format}
+                              {record.soldDate
+                                ? "已卖出"
+                                : isFrozenPsPlusRecord(record, settings.psPlusEnabled)
+                                  ? "会员冻结"
+                                  : record.format}
                             </div>
                           </div>
                           <div className="flex flex-1 flex-col gap-3 p-3 sm:p-4">
@@ -1991,7 +2061,7 @@ export default function LedgerClient({
                                   <button
                                     className="danger-button min-w-0 px-2"
                                     type="button"
-                                    onClick={() => deleteRecord(record.id)}
+                                    onClick={() => requestDeleteRecord(record)}
                                   >
                                     删除
                                   </button>
@@ -2008,7 +2078,7 @@ export default function LedgerClient({
                       ) : (
                         <article
                           key={record.id}
-                          className={`record-list-row${record.soldDate ? " sold-record" : ""}`}
+                          className={`record-list-row${record.soldDate || isFrozenPsPlusRecord(record, settings.psPlusEnabled) ? " sold-record" : ""}`}
                         >
                           <div className="record-list-cover bg-primary">
                             {record.coverUrl ? (
@@ -2050,8 +2120,20 @@ export default function LedgerClient({
                               ) : null}
                             </div>
                             <div className="record-list-status">
-                              <span className={record.soldDate ? "sold" : ""}>
-                                {record.soldDate ? "已卖出" : "持有中"}
+                              <span
+                                className={
+                                  record.soldDate
+                                    ? "sold"
+                                    : isFrozenPsPlusRecord(record, settings.psPlusEnabled)
+                                      ? "frozen"
+                                      : ""
+                                }
+                              >
+                                {record.soldDate
+                                  ? "已卖出"
+                                  : isFrozenPsPlusRecord(record, settings.psPlusEnabled)
+                                    ? "会员冻结"
+                                    : "持有中"}
                               </span>
                               {record.soldDate ? (
                                 <strong>
@@ -2081,7 +2163,7 @@ export default function LedgerClient({
                               <button
                                 className="danger-button"
                                 type="button"
-                                onClick={() => deleteRecord(record.id)}
+                                onClick={() => requestDeleteRecord(record)}
                               >
                                 删除
                               </button>
@@ -2310,11 +2392,23 @@ export default function LedgerClient({
                 </section>
               ) : null}
 
+              <ConfirmationDialog
+                open={Boolean(pendingDeleteRecord)}
+                title="删除游戏记录？"
+                description={
+                  pendingDeleteRecord
+                    ? `将永久删除“${pendingDeleteRecord.title}”及其价格、日期和备注，此操作无法撤销。`
+                    : ""
+                }
+                onCancel={() => setPendingDeleteRecord(null)}
+                onConfirm={confirmDeleteRecord}
+              />
+
               {authPanelOpen ? (
                 <div
                   className="share-dialog-backdrop"
                   role="presentation"
-                  onMouseDown={() => setAuthPanelOpen(false)}
+                  onMouseDown={closeAuthPanel}
                 >
                   <form
                     ref={authDialogRef}
@@ -2328,10 +2422,18 @@ export default function LedgerClient({
                   >
                     <div>
                       <p className="ledger-kicker">
-                        {registrationOpen ? "首次使用" : "管理员登录"}
+                        {registrationOpen
+                          ? "首次使用"
+                          : passwordResetMode
+                            ? "账户恢复"
+                            : "管理员登录"}
                       </p>
                       <h2 id="auth-dialog-title" className="mt-1 text-2xl font-bold">
-                        {registrationOpen ? "注册管理员账号" : "登录 GameNote"}
+                        {registrationOpen
+                          ? "注册管理员账号"
+                          : passwordResetMode
+                            ? "重置管理员密码"
+                            : "登录 GameNote"}
                       </h2>
                     </div>
                     <label className="field">
@@ -2343,16 +2445,54 @@ export default function LedgerClient({
                         placeholder="3-32 位字母或数字"
                       />
                     </label>
-                    <label className="field">
-                      <span>密码</span>
-                      <input
-                        autoComplete={registrationOpen ? "new-password" : "current-password"}
-                        type="password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        placeholder="至少 8 位"
-                      />
-                    </label>
+                    {passwordResetMode ? (
+                      <>
+                        <label className="field">
+                          <span>密码重置码</span>
+                          <input
+                            autoComplete="one-time-code"
+                            type="password"
+                            value={passwordResetToken}
+                            onChange={(event) => setPasswordResetToken(event.target.value)}
+                            placeholder="服务器环境变量中的重置码"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>新密码</span>
+                          <input
+                            autoComplete="new-password"
+                            type="password"
+                            value={passwordResetNewPassword}
+                            onChange={(event) => setPasswordResetNewPassword(event.target.value)}
+                            placeholder="8-128 位"
+                          />
+                        </label>
+                        {!passwordResetEnabled ? (
+                          <p
+                            className="alert alert-warning py-2 text-sm font-semibold"
+                            role="alert"
+                          >
+                            请先在服务器 .env 配置 GAMENOTE_PASSWORD_RESET_TOKEN 并重启容器。
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <label className="field">
+                        <span>密码</span>
+                        <input
+                          autoComplete={registrationOpen ? "new-password" : "current-password"}
+                          type="password"
+                          value={password}
+                          onChange={(event) => setPassword(event.target.value)}
+                          placeholder="至少 8 位"
+                        />
+                      </label>
+                    )}
+                    {passwordNotice ? (
+                      <p className="alert alert-success py-2 text-sm font-semibold" role="status">
+                        {passwordNotice}
+                      </p>
+                    ) : null}
                     {passwordError ? (
                       <p className="alert alert-warning py-2 text-sm font-semibold" role="alert">
                         {passwordError}
@@ -2362,14 +2502,31 @@ export default function LedgerClient({
                       <button
                         className="ghost-button"
                         type="button"
-                        onClick={() => setAuthPanelOpen(false)}
+                        onClick={passwordResetMode ? leavePasswordResetMode : closeAuthPanel}
                       >
-                        取消
+                        {passwordResetMode ? "返回登录" : "取消"}
                       </button>
-                      <button className="primary-button" type="submit">
-                        {registrationOpen ? "注册并登录" : "登录"}
+                      <button
+                        className="primary-button"
+                        type="submit"
+                        disabled={passwordResetMode && !passwordResetEnabled}
+                      >
+                        {registrationOpen ? "注册并登录" : passwordResetMode ? "重置密码" : "登录"}
                       </button>
                     </div>
+                    {!registrationOpen && !passwordResetMode ? (
+                      <button
+                        className="auth-reset-link"
+                        type="button"
+                        onClick={() => {
+                          setPasswordResetMode(true);
+                          setPasswordError("");
+                          setPasswordNotice("");
+                        }}
+                      >
+                        忘记密码？
+                      </button>
+                    ) : null}
                   </form>
                 </div>
               ) : null}

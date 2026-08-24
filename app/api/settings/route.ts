@@ -27,12 +27,12 @@ export async function GET(request: NextRequest) {
     showPlayStation: settings.showPlayStation,
     showPsPlusCatalog: settings.showPsPlusCatalog,
     showMemberships: settings.showMemberships,
+    psPlusEnabled: settings.psPlusEnabled,
     ...(identity
       ? {
           aiBaseUrl: settings.aiBaseUrl,
           aiModel: settings.aiModel,
           aiApiKeyConfigured: Boolean(settings.aiApiKey),
-          psPlusEnabled: settings.psPlusEnabled,
           psPlusExpiresAt: settings.psPlusExpiresAt,
           psPlusAutoAddMonthly: settings.psPlusAutoAddMonthly,
           nsOnlineEnabled: settings.nsOnlineEnabled,

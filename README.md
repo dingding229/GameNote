@@ -2,9 +2,9 @@
 
 GameNote 是一个面向个人部署的游戏收藏与购买记录应用，支持 Nintendo Switch、PlayStation、PS Plus 游戏目录、会员记录、价格统计、JSON 备份和 AI 订单截图识别。
 
-当前稳定版本：`1.0.6`。正式版本使用 `v主版本.次版本.修订版本` Git 标签发布。
+当前稳定版本：`1.0.7`。正式版本使用 `v主版本.次版本.修订版本` Git 标签发布。
 
-Docker Hub 只保留两类标签：`latest` 始终指向最新稳定版，`1.0.6` 这类完整版本号永久固定到对应版本。不再发布 `1.0`、`1` 或 `sha-*` 标签。生产环境建议固定完整版本号，需要升级时再明确修改。
+Docker Hub 只保留两类标签：`latest` 始终指向最新稳定版，`1.0.7` 这类完整版本号永久固定到对应版本。不再发布 `1.0`、`1` 或 `sha-*` 标签。生产环境建议固定完整版本号，需要升级时再明确修改。
 
 应用采用 Next.js、React、TypeScript 与 SQLite 构建，默认通过 Docker Compose 部署。Docker 镜像由 GitHub Actions 自动构建并发布到 Docker Hub。游客可以只读浏览收藏，管理员登录后才能修改数据和使用管理工具。
 
@@ -15,6 +15,7 @@ Docker Hub 只保留两类标签：`latest` 始终指向最新稳定版，`1.0.6
 - Nintendo Switch 与 PlayStation 独立游戏库。
 - 记录游戏名称、平台、实体/数字版、版本地区、买入价格、币种、购买日期、渠道和备注。
 - 游戏可记录卖出日期、价格和币种；已卖出的记录会变灰并排列在当前收藏之后。
+- PS Plus 会员到期后，自动加入的会免记录会冻结、变灰并排列到当前收藏之后；续费生效后自动恢复。
 - 封面网格和紧凑列表两种展示方式。
 - 支持名称搜索、地区版本、数字版/实体版筛选、排序、平台统计和人民币汇率折算。
 - 繁体中文标题自动规范为简体中文，搜索时进行繁简归一化。
@@ -58,7 +59,9 @@ Docker Hub 只保留两类标签：`latest` 始终指向最新稳定版，`1.0.6
 - 密码使用异步 scrypt 哈希，不保存明文。
 - 登录失败按客户端地址与账号限流。
 - 会话 Cookie 使用 HttpOnly、SameSite=Strict 和签名 JWT。
-- 修改密码会立即撤销全部旧登录会话，并要求重新登录。
+- 游戏和会员记录删除前均使用站内确认对话框进行二次确认。
+- 修改或重置密码会立即撤销全部旧登录会话，并要求重新登录。
+- 忘记密码时可由部署者临时配置服务器密码重置码，不需要删除数据库或重新注册。
 - 收藏保存使用 `updatedAt` 乐观锁，避免多个页面或 PS Plus 同步相互覆盖数据。
 - 分享图封面代理仅允许已登录管理员访问，只接受通过文件签名校验的 JPEG、PNG、WebP 和 AVIF。
 
@@ -112,6 +115,7 @@ services:
     environment:
       PS_PLUS_CATALOG_REFRESH_HOURS: ${PS_PLUS_CATALOG_REFRESH_HOURS:-12}
       JWT_SECRET: ${JWT_SECRET:?请复制 .env.example 为 .env，并配置 JWT_SECRET}
+      GAMENOTE_PASSWORD_RESET_TOKEN: ${GAMENOTE_PASSWORD_RESET_TOKEN:-}
       APP_DATABASE_FILE: "/data/records.sqlite"
     volumes:
       - ./data:/data
@@ -119,8 +123,9 @@ services:
 
 | 环境变量                        | 是否必需 | 默认值                        | 说明                                                           |
 | ------------------------------- | :------: | ----------------------------- | -------------------------------------------------------------- |
-| `GAMENOTE_IMAGE`                |    否    | `dingding229/gamenote:latest` | Docker Hub 镜像；建议固定到 `1.0.6` 等完整正式版本标签。       |
+| `GAMENOTE_IMAGE`                |    否    | `dingding229/gamenote:latest` | Docker Hub 镜像；建议固定到 `1.0.7` 等完整正式版本标签。       |
 | `JWT_SECRET`                    |    是    | 无                            | JWT 会话签名密钥，生产环境至少 32 字节。修改后现有会话会失效。 |
+| `GAMENOTE_PASSWORD_RESET_TOKEN` |    否    | 空                            | 临时密码重置码，至少 16 个字符；不使用或重置完成后应删除。     |
 | `APP_DATABASE_FILE`             |    否    | `/data/records.sqlite`        | SQLite 数据库文件路径，Docker 配置已经写入。                   |
 | `PS_PLUS_CATALOG_REFRESH_HOURS` |    否    | `12`                          | PS Plus 游戏目录缓存刷新间隔，单位为小时。                     |
 
@@ -156,6 +161,20 @@ docker run -d \
 ```
 
 容器使用宿主机当前目录下的 `data` 文件夹持久化 SQLite 数据。删除或重建容器不会删除该文件夹。
+
+## 忘记管理员密码
+
+在部署目录生成临时重置码并重建容器：
+
+```bash
+GAMENOTE_RESET_CODE="$(openssl rand -base64 32)"
+printf '\nGAMENOTE_PASSWORD_RESET_TOKEN=%s\n' "$GAMENOTE_RESET_CODE" >> .env
+printf '临时密码重置码：%s\n' "$GAMENOTE_RESET_CODE"
+unset GAMENOTE_RESET_CODE
+docker compose up -d --force-recreate
+```
+
+打开登录窗口，点击“忘记密码？”，填写管理员账号、`.env` 中的重置码和新密码。成功后，删除 `.env` 中的 `GAMENOTE_PASSWORD_RESET_TOKEN` 行，再次执行 `docker compose up -d --force-recreate`。重置会使所有已有登录会话立即失效。
 
 ## 更新、日志与停止
 
@@ -283,6 +302,7 @@ data/                           本地 SQLite 数据，不纳入版本控制
 ## 安全与部署建议
 
 - 为每个部署生成不同的 `JWT_SECRET`，不要使用示例文本或短密码。
+- 密码重置码只在恢复账号时临时启用，重置后立即从 `.env` 删除并重建容器。
 - 不要提交 `.env`、`data/records.sqlite` 或 JSON 备份。
 - 公网部署应使用 HTTPS 反向代理，并在代理层增加速率限制和安全响应头。
 - 登录限流保存在当前 Node 进程内；多实例部署时应改用 Redis 等共享限流存储。

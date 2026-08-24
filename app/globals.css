@@ -733,6 +733,71 @@ a:focus-visible,
   background: color-mix(in srgb, var(--color-error) 14%, var(--color-base-100));
 }
 
+.confirmation-dialog {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 30rem;
+  padding: 1.35rem;
+  width: calc(100% - 2rem);
+}
+.confirmation-dialog-body {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.9rem;
+}
+.confirmation-dialog-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-error) 10%, white);
+  border: 1px solid color-mix(in srgb, var(--color-error) 28%, var(--color-base-300));
+  border-radius: 50%;
+  color: var(--color-error);
+  display: flex;
+  font-size: 1.1rem;
+  font-weight: 900;
+  flex: 0 0 auto;
+  height: 2.5rem;
+  justify-content: center;
+  width: 2.5rem;
+}
+.confirmation-dialog h2,
+.confirmation-dialog p {
+  margin: 0;
+}
+.confirmation-dialog h2 {
+  font-size: 1.1rem;
+}
+.confirmation-dialog p {
+  color: color-mix(in srgb, var(--color-base-content) 66%, transparent);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  margin-top: 0.35rem;
+}
+.confirmation-dialog-actions {
+  display: flex;
+  gap: 0.65rem;
+  justify-content: flex-end;
+}
+.confirmation-dialog-actions button {
+  min-width: 6.5rem;
+}
+.auth-reset-link {
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-weight: 800;
+  justify-self: center;
+  padding: 0.2rem 0.5rem;
+}
+.auth-reset-link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 520px) {
+  .confirmation-dialog-actions button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
 .display-mode-switch {
   background: var(--color-base-200);
   border: 1px solid var(--color-base-300);
@@ -966,6 +1031,9 @@ a:focus-visible,
 .record-list-status span.sold,
 .record-list-status strong {
   color: var(--color-success);
+}
+.record-list-status span.frozen {
+  color: var(--color-primary);
 }
 
 .record-list-actions {

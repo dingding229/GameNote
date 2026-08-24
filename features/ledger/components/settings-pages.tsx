@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, ReactNode, RefObject, SetStateAction } from "react";
 import { currencies } from "../constants";
 import type {
@@ -9,6 +12,7 @@ import type {
 } from "../types";
 import { ModelCombobox } from "./model-combobox";
 import { PsPlusHistory } from "./ps-plus-history";
+import { ConfirmationDialog } from "./confirmation-dialog";
 
 type SettingsUpdater = Dispatch<SetStateAction<SettingsState>>;
 
@@ -351,6 +355,7 @@ export function MembershipPage({
   onHistoryCompleted,
 }: MembershipPageProps) {
   const today = new Date().toISOString().slice(0, 10);
+  const [pendingPeriod, setPendingPeriod] = useState<MembershipPeriod | null>(null);
 
   function addPeriod(service: MembershipService) {
     setSettings((current) => ({
@@ -389,6 +394,12 @@ export function MembershipPage({
     }));
   }
 
+  function confirmPeriodRemoval() {
+    if (!pendingPeriod) return;
+    removePeriod(pendingPeriod.id);
+    setPendingPeriod(null);
+  }
+
   const hasActivePsPlus = settings.membershipPeriods.some(
     (period) =>
       period.service === "PlayStation Plus" &&
@@ -411,7 +422,9 @@ export function MembershipPage({
           today={today}
           onAdd={() => addPeriod(service)}
           onChange={updatePeriod}
-          onRemove={removePeriod}
+          onRemove={(id) =>
+            setPendingPeriod(settings.membershipPeriods.find((period) => period.id === id) || null)
+          }
         >
           {service === "PlayStation Plus" ? (
             <>
@@ -452,6 +465,17 @@ export function MembershipPage({
           ) : null}
         </MembershipPeriodSection>
       ))}
+      <ConfirmationDialog
+        open={Boolean(pendingPeriod)}
+        title="删除会员记录？"
+        description={
+          pendingPeriod
+            ? `将删除 ${pendingPeriod.service} ${pendingPeriod.startDate || "未知日期"} 至 ${pendingPeriod.endDate} 的记录，此操作保存后无法撤销。`
+            : ""
+        }
+        onCancel={() => setPendingPeriod(null)}
+        onConfirm={confirmPeriodRemoval}
+      />
       <footer>
         <span role="status" aria-live="polite">
           {settingsStatus}
