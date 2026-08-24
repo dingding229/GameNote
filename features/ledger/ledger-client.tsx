@@ -1453,10 +1453,7 @@ export default function LedgerClient({
             <span>GN</span>
             <div>
               <strong>{settings.siteTitle}</strong>
-              <small>
-                游戏收藏记录 · v{versionInfo.currentVersion}
-                {versionInfo.updateAvailable ? " · 有更新" : ""}
-              </small>
+              <small>游戏收藏记录</small>
             </div>
           </div>
           <AppToolbar groups={toolbarGroups} />
@@ -1541,8 +1538,6 @@ export default function LedgerClient({
                   authenticated={accessStatus === "unlocked"}
                   registrationOpen={registrationOpen}
                   username={currentUsername}
-                  version={versionInfo.currentVersion}
-                  updateAvailable={versionInfo.updateAvailable}
                   onLogin={openAuthPanel}
                   onLogout={lockLedger}
                   onSettings={() => switchView("settings")}

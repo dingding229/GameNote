@@ -552,15 +552,9 @@ function MembershipPeriodSection({
                   </label>
                   <label className="field">
                     <span>购买价格</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100000000"
-                      step="0.01"
-                      value={period.price}
-                      onChange={(event) =>
-                        onChange(period.id, "price", Number(event.target.value) || 0)
-                      }
+                    <MembershipPriceInput
+                      price={period.price}
+                      onChange={(price) => onChange(period.id, "price", price)}
                     />
                   </label>
                   <label className="field">
@@ -589,5 +583,40 @@ function MembershipPeriodSection({
         {children ? <div className="membership-period-actions">{children}</div> : null}
       </div>
     </section>
+  );
+}
+
+function MembershipPriceInput({
+  price,
+  onChange,
+}: {
+  price: number;
+  onChange: (price: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(price));
+
+  function updatePrice(value: string) {
+    setDraft(value);
+    if (value === "") return;
+    const nextPrice = Number(value);
+    if (Number.isFinite(nextPrice)) onChange(nextPrice);
+  }
+
+  function finishEditing() {
+    if (draft !== "") return;
+    setDraft("0");
+    onChange(0);
+  }
+
+  return (
+    <input
+      type="number"
+      min="0"
+      max="100000000"
+      step="0.01"
+      value={draft}
+      onChange={(event) => updatePrice(event.target.value)}
+      onBlur={finishEditing}
+    />
   );
 }

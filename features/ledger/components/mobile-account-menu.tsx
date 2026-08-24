@@ -7,8 +7,6 @@ type MobileAccountMenuProps = {
   authenticated: boolean;
   registrationOpen: boolean;
   username: string;
-  version: string;
-  updateAvailable: boolean;
   onLogin: () => void;
   onLogout: () => void | Promise<void>;
   onSettings: () => void;
@@ -19,8 +17,6 @@ export function MobileAccountMenu({
   authenticated,
   registrationOpen,
   username,
-  version,
-  updateAvailable,
   onLogin,
   onLogout,
   onSettings,
@@ -72,10 +68,6 @@ export function MobileAccountMenu({
           <div>
             <strong>{authenticated ? username : "访客"}</strong>
             <span>{authenticated ? "管理员账户" : "只读浏览"}</span>
-            <span>
-              v{version}
-              {updateAvailable ? " · 有新版本" : ""}
-            </span>
           </div>
           {authenticated ? (
             <>
