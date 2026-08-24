@@ -37,6 +37,15 @@ export type SaveStatus = "idle" | "saving" | "saved" | "error";
 export type ActiveView = "records" | "form" | "settings" | "ps-plus-catalog" | "memberships";
 export type RecordDisplayMode = "grid" | "list";
 
+export type VersionInfo = {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  checkedAt: string;
+  stale?: boolean;
+  error?: string;
+};
+
 export type ShareOptions = {
   showPrice: boolean;
   showSale: boolean;

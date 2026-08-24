@@ -1,6 +1,12 @@
 import type { ChangeEvent, Dispatch, FormEvent, ReactNode, RefObject, SetStateAction } from "react";
 import { currencies } from "../constants";
-import type { Currency, MembershipPeriod, MembershipService, SettingsState } from "../types";
+import type {
+  Currency,
+  MembershipPeriod,
+  MembershipService,
+  SettingsState,
+  VersionInfo,
+} from "../types";
 import { ModelCombobox } from "./model-combobox";
 
 type SettingsUpdater = Dispatch<SetStateAction<SettingsState>>;
@@ -20,6 +26,9 @@ type SettingsPageProps = {
   onImport: (event: ChangeEvent<HTMLInputElement>) => void;
   onExport: () => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
+  versionInfo: VersionInfo;
+  versionChecking: boolean;
+  onCheckVersion: () => void;
 };
 
 export function SettingsPage({
@@ -37,6 +46,9 @@ export function SettingsPage({
   onImport,
   onExport,
   fileInputRef,
+  versionInfo,
+  versionChecking,
+  onCheckVersion,
 }: SettingsPageProps) {
   function selectAvatar(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -224,6 +236,50 @@ export function SettingsPage({
             type="file"
             onChange={onImport}
           />
+        </div>
+      </section>
+      <section className="settings-section">
+        <div>
+          <h3>版本与更新</h3>
+          <p>自动检查 GitHub 上发布的最新正式版本。</p>
+        </div>
+        <div className="version-panel">
+          <div className="version-summary">
+            <span>当前版本</span>
+            <strong>v{versionInfo.currentVersion}</strong>
+          </div>
+          {versionInfo.updateAvailable ? (
+            <p className="version-update-available">
+              发现新版本 v{versionInfo.latestVersion}，请更新 Docker 镜像。
+            </p>
+          ) : versionInfo.error ? (
+            <p>{versionInfo.error}，稍后可以重新检查。</p>
+          ) : versionInfo.latestVersion ? (
+            <p>
+              已是最新版本
+              {versionInfo.stale ? "（使用上次检查结果）" : ""}
+            </p>
+          ) : (
+            <p>正在获取最新版本信息。</p>
+          )}
+          <div className="settings-actions">
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={versionChecking}
+              onClick={onCheckVersion}
+            >
+              {versionChecking ? "检查中" : "检查更新"}
+            </button>
+            <a
+              className="secondary-button"
+              href="https://github.com/dingding229/GameNote/tags"
+              target="_blank"
+              rel="noreferrer"
+            >
+              查看版本记录
+            </a>
+          </div>
         </div>
       </section>
       <section className="settings-section">

@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useSta
 import { normalizeChineseSearchText } from "@/lib/game/title-normalization";
 import { ledgerLimits } from "@/lib/ledger/limits";
 import { defaultThemeColor, themeColorContent } from "@/lib/ui/theme-color";
+import { appVersion } from "@/lib/version";
 import { AppToolbar, Stat } from "./components/app-toolbar";
 import {
   catalogPageSize,
@@ -44,6 +45,7 @@ import type {
   SettingsState,
   ShareOptions,
   ToolbarGroup,
+  VersionInfo,
 } from "./types";
 import {
   convertToCny,
@@ -152,6 +154,13 @@ export default function LedgerClient({
   });
   const [settingsReady, setSettingsReady] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState("");
+  const [versionInfo, setVersionInfo] = useState<VersionInfo>({
+    currentVersion: appVersion,
+    latestVersion: "",
+    updateAvailable: false,
+    checkedAt: "",
+  });
+  const [versionChecking, setVersionChecking] = useState(false);
   const [aiActionStatus, setAiActionStatus] = useState("");
   const [aiModels, setAiModels] = useState<string[]>([]);
   const [psPlusStatus, setPsPlusStatus] = useState("");
@@ -220,6 +229,33 @@ export default function LedgerClient({
     }
   }, [loadLedger]);
 
+  const checkVersion = useCallback(async (force = false) => {
+    setVersionChecking(true);
+    try {
+      const response = await fetch(`/api/version${force ? "?refresh=1" : ""}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => ({}))) as Partial<VersionInfo>;
+      if (!response.ok || typeof payload.currentVersion !== "string")
+        throw new Error(payload.error || "无法检查更新");
+      setVersionInfo({
+        currentVersion: payload.currentVersion,
+        latestVersion: typeof payload.latestVersion === "string" ? payload.latestVersion : "",
+        updateAvailable: payload.updateAvailable === true,
+        checkedAt: typeof payload.checkedAt === "string" ? payload.checkedAt : "",
+        stale: payload.stale === true,
+        error: typeof payload.error === "string" ? payload.error : undefined,
+      });
+    } catch (error) {
+      setVersionInfo((current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : "无法检查更新",
+      }));
+    } finally {
+      setVersionChecking(false);
+    }
+  }, []);
+
   const applyPlatformPage = useCallback(
     (platform: GamePlatform, urlMode: "push" | "replace" | false) => {
       if (urlMode) {
@@ -253,6 +289,10 @@ export default function LedgerClient({
 
     return () => window.cancelAnimationFrame(frame);
   }, [checkAccess]);
+
+  useEffect(() => {
+    void checkVersion();
+  }, [checkVersion]);
 
   useEffect(() => {
     if (accessStatus === "checking") return;
@@ -1276,7 +1316,10 @@ export default function LedgerClient({
             <span>GN</span>
             <div>
               <strong>{settings.siteTitle}</strong>
-              <small>游戏收藏记录</small>
+              <small>
+                游戏收藏记录 · v{versionInfo.currentVersion}
+                {versionInfo.updateAvailable ? " · 有更新" : ""}
+              </small>
             </div>
           </div>
           <AppToolbar groups={toolbarGroups} />
@@ -1361,6 +1404,8 @@ export default function LedgerClient({
                   authenticated={accessStatus === "unlocked"}
                   registrationOpen={registrationOpen}
                   username={currentUsername}
+                  version={versionInfo.currentVersion}
+                  updateAvailable={versionInfo.updateAvailable}
                   onLogin={() => setAuthPanelOpen(true)}
                   onLogout={lockLedger}
                   onSettings={() => switchView("settings")}
@@ -1721,6 +1766,9 @@ export default function LedgerClient({
                   onImport={importRecords}
                   onExport={exportRecords}
                   fileInputRef={fileInputRef}
+                  versionInfo={versionInfo}
+                  versionChecking={versionChecking}
+                  onCheckVersion={() => void checkVersion(true)}
                 />
               ) : null}
 

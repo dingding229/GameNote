@@ -1245,6 +1245,32 @@ a:focus-visible,
   font-size: 0.8rem;
   font-weight: 700;
 }
+.version-panel {
+  background: var(--color-base-200);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-box);
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+}
+.version-summary {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.version-summary span,
+.version-panel > p {
+  color: color-mix(in srgb, var(--color-base-content) 64%, transparent);
+  font-size: 0.8rem;
+}
+.version-summary strong {
+  color: var(--color-primary);
+  font-size: 1.05rem;
+}
+.version-panel > .version-update-available {
+  color: var(--color-primary);
+  font-weight: 800;
+}
 .membership-page {
   min-height: calc(100vh - 9rem);
 }
