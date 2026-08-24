@@ -1,14 +1,15 @@
 # syntax=docker/dockerfile:1
 
 ARG NODE_VERSION=22.23.2
+ARG BUILDPLATFORM
 
-FROM node:${NODE_VERSION}-alpine AS deps
+FROM --platform=${BUILDPLATFORM} node:${NODE_VERSION}-alpine AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:${NODE_VERSION}-alpine AS builder
+FROM --platform=${BUILDPLATFORM} node:${NODE_VERSION}-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
