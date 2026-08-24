@@ -1,8 +1,6 @@
 services:
   gamenote:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${GAMENOTE_IMAGE:-dingding229/gamenote:latest}
     container_name: gamenote
     restart: unless-stopped
     init: true

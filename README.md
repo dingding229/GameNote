@@ -2,7 +2,7 @@
 
 GameNote 是一个面向个人部署的游戏收藏与购买记录应用，支持 Nintendo Switch、PlayStation、PS Plus 游戏目录、会员记录、价格统计、JSON 备份和 AI 订单截图识别。
 
-应用采用 Next.js、React、TypeScript 与 SQLite 构建，默认通过 Docker Compose 部署。游客可以只读浏览收藏，管理员登录后才能修改数据和使用管理工具。
+应用采用 Next.js、React、TypeScript 与 SQLite 构建，默认通过 Docker Compose 部署。Docker 镜像由 GitHub Actions 自动构建并发布到 Docker Hub。游客可以只读浏览收藏，管理员登录后才能修改数据和使用管理工具。
 
 ## 主要功能
 
@@ -86,10 +86,11 @@ openssl rand -base64 48
 JWT_SECRET=在这里填写独立随机值
 ```
 
-不要提交真实的 `.env` 或 JWT 密钥。随后构建并启动：
+不要提交真实的 `.env` 或 JWT 密钥。随后拉取镜像并启动：
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 浏览器访问 `http://localhost:3000`。第一次访问时点击“注册管理员”，然后进入设置页面配置游戏库、会员信息及 AI 服务。
@@ -101,9 +102,7 @@ docker compose up -d --build
 ```yaml
 services:
   gamenote:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${GAMENOTE_IMAGE:-dingding229/gamenote:latest}
     container_name: gamenote
     restart: unless-stopped
     init: true
@@ -117,11 +116,12 @@ services:
       - ./data:/data
 ```
 
-| 环境变量                        | 是否必需 | 默认值                 | 说明                                                           |
-| ------------------------------- | :------: | ---------------------- | -------------------------------------------------------------- |
-| `JWT_SECRET`                    |    是    | 无                     | JWT 会话签名密钥，生产环境至少 32 字节。修改后现有会话会失效。 |
-| `APP_DATABASE_FILE`             |    否    | `/data/records.sqlite` | SQLite 数据库文件路径，Docker 配置已经写入。                   |
-| `PS_PLUS_CATALOG_REFRESH_HOURS` |    否    | `12`                   | PS Plus 游戏目录缓存刷新间隔，单位为小时。                     |
+| 环境变量                        | 是否必需 | 默认值                        | 说明                                                           |
+| ------------------------------- | :------: | ----------------------------- | -------------------------------------------------------------- |
+| `GAMENOTE_IMAGE`                |    否    | `dingding229/gamenote:latest` | Docker Hub 镜像；可固定到版本或 `sha-xxxxxxx` 标签。           |
+| `JWT_SECRET`                    |    是    | 无                            | JWT 会话签名密钥，生产环境至少 32 字节。修改后现有会话会失效。 |
+| `APP_DATABASE_FILE`             |    否    | `/data/records.sqlite`        | SQLite 数据库文件路径，Docker 配置已经写入。                   |
+| `PS_PLUS_CATALOG_REFRESH_HOURS` |    否    | `12`                          | PS Plus 游戏目录缓存刷新间隔，单位为小时。                     |
 
 以下内容不再通过环境变量维护：
 
@@ -134,10 +134,10 @@ services:
 ## 更新、日志与停止
 
 ```bash
-# 更新并重新构建
+# 拉取代码中的最新部署配置与 Docker Hub 镜像
 git pull
-docker compose down --remove-orphans
-docker compose up -d --build
+docker compose pull
+docker compose up -d --remove-orphans
 
 # 查看日志
 docker compose logs -f gamenote
@@ -182,7 +182,7 @@ Error: Cannot find module '../../lib/picocolors'
 ```bash
 git pull
 docker compose down --remove-orphans
-docker compose build --pull --no-cache
+docker compose pull
 docker compose up -d
 docker compose ps
 docker compose logs --tail=100 gamenote
@@ -194,6 +194,32 @@ docker compose logs --tail=100 gamenote
 docker compose ps
 docker inspect gamenote --format '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}'
 docker compose logs --tail=200 gamenote
+```
+
+## Docker 镜像自动发布
+
+仓库中的 `.github/workflows/publish-docker.yml` 会在以下情况发布镜像：
+
+- 推送到 `main`：发布 `latest` 和 `sha-xxxxxxx` 标签。
+- 推送 `v*` 版本标签：发布语义化版本和 `sha-xxxxxxx` 标签。
+- 在 GitHub Actions 页面手动运行工作流。
+
+镜像同时支持 `linux/amd64` 和 `linux/arm64`，并包含来源证明与 SBOM。首次运行前，在 GitHub 仓库的 `Settings → Secrets and variables → Actions` 中配置：
+
+1. Repository variable `DOCKERHUB_USERNAME`：Docker Hub 用户名，例如 `dingding229`。
+2. Repository secret `DOCKERHUB_TOKEN`：具有 Read & Write 权限的 Docker Hub Personal access token；不要使用账户密码。
+
+首次推送可以自动创建 `gamenote` 仓库，其公开或私有状态取决于 Docker Hub 账号的默认仓库可见性。公开部署前请在 Docker Hub 确认仓库为 Public。
+
+如需固定部署版本，在 `.env` 中指定镜像标签后重新拉取：
+
+```dotenv
+GAMENOTE_IMAGE=dingding229/gamenote:1.0.0
+```
+
+```bash
+docker compose pull
+docker compose up -d
 ```
 
 ## 本地开发与质量检查
