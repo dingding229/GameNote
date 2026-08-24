@@ -2,6 +2,8 @@
 
 GameNote 是一个面向个人部署的游戏收藏与购买记录应用，支持 Nintendo Switch、PlayStation、PS Plus 游戏目录、会员记录、价格统计、JSON 备份和 AI 订单截图识别。
 
+当前稳定版本：`1.0.0`。正式版本使用 `v主版本.次版本.修订版本` Git 标签和对应 Docker 镜像标签发布，便于部署时固定版本并按需更新。
+
 应用采用 Next.js、React、TypeScript 与 SQLite 构建，默认通过 Docker Compose 部署。Docker 镜像由 GitHub Actions 自动构建并发布到 Docker Hub。游客可以只读浏览收藏，管理员登录后才能修改数据和使用管理工具。
 
 ## 主要功能
@@ -10,9 +12,9 @@ GameNote 是一个面向个人部署的游戏收藏与购买记录应用，支�
 
 - Nintendo Switch 与 PlayStation 独立游戏库。
 - 记录游戏名称、平台、实体/数字版、版本地区、买入价格、币种、购买日期、渠道和备注。
-- 实体游戏可记录卖出日期、价格和币种。
+- 游戏可记录卖出日期、价格和币种；已卖出的记录会变灰并排列在当前收藏之后。
 - 封面网格和紧凑列表两种展示方式。
-- 支持名称搜索、排序、平台统计和人民币汇率折算。
+- 支持名称搜索、地区版本、数字版/实体版筛选、排序、平台统计和人民币汇率折算。
 - 繁体中文标题自动规范为简体中文，搜索时进行繁简归一化。
 
 ### 官方数据查询
@@ -26,8 +28,8 @@ GameNote 是一个面向个人部署的游戏收藏与购买记录应用，支�
 
 - PS Plus 游戏库独立页面，展示港区升级与高级会员目录、中文名、封面和支持平台。
 - PS Plus 目录使用 SQLite 缓存，默认每 12 小时后台刷新一次；管理员可以手动刷新。
-- 可记录 PlayStation Plus 和 Nintendo Switch Online 的启用状态及到期日期。
-- 可从 PlayStation Blog 获取本月 PS Plus 会免游戏，去重后自动加入收藏。
+- PlayStation Plus 和 Nintendo Switch Online 按起止时间记录会员周期、购买价格及币种，过期记录会保留。
+- 可从 PlayStation Blog 获取本月 PS Plus 会免游戏，补全中文名、封面和官方链接后去重加入收藏。
 
 ### AI 购买截图识别
 
@@ -42,7 +44,7 @@ GameNote 是一个面向个人部署的游戏收藏与购买记录应用，支�
 
 - 设置网站标题、头像和满足可读性要求的主题色。
 - 选择侧边栏需要展示的 Nintendo Switch、PlayStation、PS Plus 游戏库和会员工具。
-- JSON 导入和导出统一位于“设置 → 数据备份”。
+- JSON 导入和导出统一位于“设置 → 数据备份”，备份包含购买记录和非敏感应用设置。
 - JSON 文件最大 5MB，最多包含 2,000 条记录。
 - 收藏分享图支持价格、购买日期、卖出信息和备注；单张图最多展示前 160 条记录，并限制封面加载并发数。
 
@@ -113,7 +115,7 @@ services:
 
 | 环境变量                        | 是否必需 | 默认值                        | 说明                                                           |
 | ------------------------------- | :------: | ----------------------------- | -------------------------------------------------------------- |
-| `GAMENOTE_IMAGE`                |    否    | `dingding229/gamenote:latest` | Docker Hub 镜像；可固定到版本或 `sha-xxxxxxx` 标签。           |
+| `GAMENOTE_IMAGE`                |    否    | `dingding229/gamenote:latest` | Docker Hub 镜像；建议固定到 `1.0.0` 等正式版本标签。           |
 | `JWT_SECRET`                    |    是    | 无                            | JWT 会话签名密钥，生产环境至少 32 字节。修改后现有会话会失效。 |
 | `APP_DATABASE_FILE`             |    否    | `/data/records.sqlite`        | SQLite 数据库文件路径，Docker 配置已经写入。                   |
 | `PS_PLUS_CATALOG_REFRESH_HOURS` |    否    | `12`                          | PS Plus 游戏目录缓存刷新间隔，单位为小时。                     |

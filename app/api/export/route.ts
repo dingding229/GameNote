@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasValidAccessCookie } from "@/lib/auth/access";
-import { readLedgerFromSqlite } from "@/lib/ledger/repository";
+import { readAppSettings, readLedgerFromSqlite } from "@/lib/ledger/repository";
 import type { GameRecord } from "@/lib/ledger/schema";
+import { appVersion } from "@/lib/version";
 
 export const runtime = "nodejs";
 
@@ -14,13 +15,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const ledger = await readLedgerFromSqlite();
+    const [ledger, settings] = await Promise.all([readLedgerFromSqlite(), readAppSettings()]);
 
     return NextResponse.json(
       {
         version: 1,
+        appVersion,
         exportedAt: new Date().toISOString(),
         records: ledger.records.map(stripVolatileRecordFields),
+        settings: stripSensitiveSettings(settings),
       },
       {
         headers: {
@@ -38,6 +41,22 @@ export async function GET(request: NextRequest) {
       { status: 500, headers: { "cache-control": "no-store" } },
     );
   }
+}
+
+function stripSensitiveSettings(settings: Awaited<ReturnType<typeof readAppSettings>>) {
+  return {
+    siteTitle: settings.siteTitle,
+    avatarUrl: settings.avatarUrl,
+    themeColor: settings.themeColor,
+    showNintendoSwitch: settings.showNintendoSwitch,
+    showPlayStation: settings.showPlayStation,
+    showPsPlusCatalog: settings.showPsPlusCatalog,
+    showMemberships: settings.showMemberships,
+    aiBaseUrl: settings.aiBaseUrl,
+    aiModel: settings.aiModel,
+    psPlusAutoAddMonthly: settings.psPlusAutoAddMonthly,
+    membershipPeriods: settings.membershipPeriods,
+  };
 }
 
 function stripVolatileRecordFields(record: GameRecord) {

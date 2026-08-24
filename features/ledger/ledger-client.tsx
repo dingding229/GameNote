@@ -122,6 +122,8 @@ export default function LedgerClient({
   const [passwordError, setPasswordError] = useState("");
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"date" | "price" | "title">("date");
+  const [regionFilter, setRegionFilter] = useState<Region | "all">("all");
+  const [formatFilter, setFormatFilter] = useState<GameFormat | "all">("all");
   const [coverResults, setCoverResults] = useState<NintendoCoverResult[]>([]);
   const [coverStatus, setCoverStatus] = useState<"idle" | "searching">("idle");
   const [coverError, setCoverError] = useState("");
@@ -146,6 +148,7 @@ export default function LedgerClient({
     psPlusAutoAddMonthly: true,
     nsOnlineEnabled: false,
     nsOnlineExpiresAt: "",
+    membershipPeriods: [],
   });
   const [settingsReady, setSettingsReady] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState("");
@@ -225,6 +228,8 @@ export default function LedgerClient({
 
       setActivePlatform(platform);
       setQuery("");
+      setRegionFilter("all");
+      setFormatFilter("all");
       setCoverResults([]);
       setCoverError("");
 
@@ -391,13 +396,21 @@ export default function LedgerClient({
         const response = await fetch("/api/ps-plus", { method: "POST" });
         const payload = (await response.json().catch(() => ({}))) as {
           added?: number;
+          updated?: number;
           message?: string;
           error?: string;
         };
         if (!response.ok) throw new Error(payload.error || "同步失败");
-        if ((payload.added || 0) > 0) {
+        if ((payload.added || 0) > 0 || (payload.updated || 0) > 0) {
           await loadLedger(true);
-          setPsPlusStatus(`已自动入库 ${payload.added} 款会免游戏`);
+          setPsPlusStatus(
+            [
+              payload.added ? `已自动入库 ${payload.added} 款会免游戏` : "",
+              payload.updated ? `已补全 ${payload.updated} 款已有会免信息` : "",
+            ]
+              .filter(Boolean)
+              .join("，"),
+          );
         } else if (!silent) setPsPlusStatus(payload.message || "当月会免已同步");
       } catch (error) {
         if (!silent) setPsPlusStatus(error instanceof Error ? error.message : "同步失败");
@@ -668,8 +681,13 @@ export default function LedgerClient({
 
   const filteredRecords = useMemo(() => {
     const normalizedQuery = normalizeChineseSearchText(query);
+    const matchingRecords = platformRecords.filter(
+      (record) =>
+        (regionFilter === "all" || record.region === regionFilter) &&
+        (formatFilter === "all" || record.format === formatFilter),
+    );
     const source = normalizedQuery
-      ? platformRecords.filter((record) =>
+      ? matchingRecords.filter((record) =>
           textMatchesQuery(
             [
               record.title,
@@ -682,9 +700,12 @@ export default function LedgerClient({
             normalizedQuery,
           ),
         )
-      : platformRecords;
+      : matchingRecords;
 
     return [...source].sort((a, b) => {
+      const soldOrder = Number(Boolean(a.soldDate)) - Number(Boolean(b.soldDate));
+      if (soldOrder !== 0) return soldOrder;
+
       if (sortBy === "price") {
         return (
           (convertToCny(b.price, b.currency, exchangeRates) ?? b.price) -
@@ -698,7 +719,7 @@ export default function LedgerClient({
 
       return new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime();
     });
-  }, [exchangeRates, platformRecords, query, sortBy]);
+  }, [exchangeRates, formatFilter, platformRecords, query, regionFilter, sortBy]);
 
   const switchCount = records.filter((record) => record.platform === "Nintendo Switch").length;
   const playStationCount = records.length - switchCount;
@@ -857,7 +878,6 @@ export default function LedgerClient({
     setForm((current) => ({
       ...current,
       platform,
-      region: platform === "PlayStation" && current.region === "日版" ? "港版" : current.region,
       format: normalizeFormatForPlatform(current.format, platform),
       soldDate: isPhysicalFormat(normalizeFormatForPlatform(current.format, platform))
         ? current.soldDate
@@ -1024,26 +1044,54 @@ export default function LedgerClient({
         : parsed && typeof parsed === "object" && "records" in parsed
           ? (parsed as { records?: unknown }).records
           : null;
+      const parsedSettings =
+        parsed && typeof parsed === "object" && "settings" in parsed
+          ? (parsed as { settings?: unknown }).settings
+          : null;
 
-      if (!Array.isArray(parsedRecords)) {
-        throw new Error("Expected an array");
+      if (
+        !Array.isArray(parsedRecords) &&
+        (!parsedSettings || typeof parsedSettings !== "object")
+      ) {
+        throw new Error("JSON 中没有可恢复的记录或设置");
       }
-      if (parsedRecords.length > ledgerLimits.maxRecords)
+      if (Array.isArray(parsedRecords) && parsedRecords.length > ledgerLimits.maxRecords)
         throw new Error(`记录数量不能超过 ${ledgerLimits.maxRecords} 条`);
 
-      const importedRecords = parsedRecords
+      const importedRecords = (Array.isArray(parsedRecords) ? parsedRecords : [])
         .map(normalizeImportedRecord)
         .filter((record): record is GameRecord => Boolean(record));
 
-      if (!importedRecords.length) {
-        throw new Error("No valid records");
+      if (Array.isArray(parsedRecords) && parsedRecords.length && !importedRecords.length) {
+        throw new Error("JSON 中没有有效的游戏记录");
       }
 
-      setRecords(importedRecords);
-      setRecordsDirty(true);
-      setSaveStatus("saving");
+      if (Array.isArray(parsedRecords)) {
+        setRecords(importedRecords);
+        setRecordsDirty(true);
+        setSaveStatus("saving");
+      }
+      if (parsedSettings && typeof parsedSettings === "object") {
+        const response = await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...settings, ...parsedSettings, aiApiKey: "" }),
+        });
+        const restoredSettings = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(restoredSettings.error || "设置恢复失败");
+        setSettings((current) => ({ ...current, ...restoredSettings, aiApiKey: "" }));
+        updateThemeColor(restoredSettings.themeColor);
+        document.title = restoredSettings.siteTitle;
+      }
       resetForm();
-      setSettingsStatus(`已导入 ${importedRecords.length} 条记录`);
+      setSettingsStatus(
+        [
+          Array.isArray(parsedRecords) ? `已导入 ${importedRecords.length} 条记录` : "",
+          parsedSettings ? "已恢复设置" : "",
+        ]
+          .filter(Boolean)
+          .join("，"),
+      );
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "JSON 文件不是有效的游戏购买记录");
     } finally {
@@ -1715,6 +1763,36 @@ export default function LedgerClient({
                         placeholder="游戏、版本、状态、渠道、备注"
                       />
                     </label>
+                    <label className="field">
+                      <span>地区版本</span>
+                      <select
+                        value={regionFilter}
+                        onChange={(event) => setRegionFilter(event.target.value as Region | "all")}
+                      >
+                        <option value="all">全部地区</option>
+                        {regions.map((region) => (
+                          <option key={region} value={region}>
+                            {region}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>游戏形态</span>
+                      <select
+                        value={formatFilter}
+                        onChange={(event) =>
+                          setFormatFilter(event.target.value as GameFormat | "all")
+                        }
+                      >
+                        <option value="all">全部形态</option>
+                        {formatOptionsForPlatform(activePlatform).map((format) => (
+                          <option key={format} value={format}>
+                            {format}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <div className="field">
                       <span>展示方式</span>
                       <div className="display-mode-switch" role="group" aria-label="记录展示方式">
@@ -1762,7 +1840,7 @@ export default function LedgerClient({
                       recordDisplayMode === "grid" ? (
                         <article
                           key={record.id}
-                          className="record-card flex h-full flex-col overflow-hidden"
+                          className={`record-card flex h-full flex-col overflow-hidden${record.soldDate ? " sold-record" : ""}`}
                         >
                           <div className="record-cover relative bg-primary">
                             {record.coverUrl ? (
@@ -1873,7 +1951,10 @@ export default function LedgerClient({
                           </div>
                         </article>
                       ) : (
-                        <article key={record.id} className="record-list-row">
+                        <article
+                          key={record.id}
+                          className={`record-list-row${record.soldDate ? " sold-record" : ""}`}
+                        >
                           <div className="record-list-cover bg-primary">
                             {record.coverUrl ? (
                               <img

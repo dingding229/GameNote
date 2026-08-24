@@ -3,6 +3,8 @@ import { accessCookieName, getAccessIdentity } from "@/lib/auth/access";
 import {
   getRegisteredUser,
   readAppSettings,
+  normalizeAppSettings,
+  normalizeMembershipPeriods,
   updateRegisteredUserPassword,
   writeAppSettings,
 } from "@/lib/ledger/repository";
@@ -35,6 +37,7 @@ export async function GET(request: NextRequest) {
           psPlusAutoAddMonthly: settings.psPlusAutoAddMonthly,
           nsOnlineEnabled: settings.nsOnlineEnabled,
           nsOnlineExpiresAt: settings.nsOnlineExpiresAt,
+          membershipPeriods: settings.membershipPeriods,
         }
       : {}),
   });
@@ -95,6 +98,11 @@ export async function PUT(request: NextRequest) {
     typeof payload.nsOnlineExpiresAt === "string"
       ? payload.nsOnlineExpiresAt.trim()
       : current.nsOnlineExpiresAt;
+  const membershipPeriods = normalizeMembershipPeriods(
+    Array.isArray(payload.membershipPeriods)
+      ? payload.membershipPeriods
+      : current.membershipPeriods,
+  );
   if (typeof payload.aiApiKey === "string" && payload.aiApiKey.trim())
     aiApiKey = payload.aiApiKey.trim();
   if (payload.clearAiApiKey === true) aiApiKey = "";
@@ -114,7 +122,7 @@ export async function PUT(request: NextRequest) {
       { error: "主题色与白色背景对比度不足，请选择更深的颜色" },
       { status: 400 },
     );
-  await writeAppSettings({
+  const updatedSettings = normalizeAppSettings({
     siteTitle,
     avatarUrl,
     themeColor,
@@ -130,23 +138,13 @@ export async function PUT(request: NextRequest) {
     psPlusAutoAddMonthly,
     nsOnlineEnabled,
     nsOnlineExpiresAt,
+    membershipPeriods,
   });
+  await writeAppSettings(updatedSettings);
   return NextResponse.json({
-    siteTitle,
-    avatarUrl,
-    themeColor,
-    showNintendoSwitch,
-    showPlayStation,
-    showPsPlusCatalog,
-    showMemberships,
-    aiBaseUrl,
-    aiModel,
+    ...updatedSettings,
     aiApiKeyConfigured: Boolean(aiApiKey),
-    psPlusEnabled,
-    psPlusExpiresAt,
-    psPlusAutoAddMonthly,
-    nsOnlineEnabled,
-    nsOnlineExpiresAt,
+    aiApiKey: undefined,
   });
 }
 

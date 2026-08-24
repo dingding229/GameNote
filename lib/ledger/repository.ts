@@ -1,5 +1,12 @@
-import { createEmptyLedger, type LedgerDocument, normalizeLedgerDocument } from "./schema";
+import {
+  createEmptyLedger,
+  currencies,
+  type Currency,
+  type LedgerDocument,
+  normalizeLedgerDocument,
+} from "./schema";
 import { defaultThemeColor, isAccessibleThemeColor } from "@/lib/ui/theme-color";
+import { validLedgerNumber } from "./limits";
 
 export type StatementSync = {
   get(...values: unknown[]): unknown;
@@ -162,6 +169,18 @@ export type AppSettings = {
   psPlusAutoAddMonthly: boolean;
   nsOnlineEnabled: boolean;
   nsOnlineExpiresAt: string;
+  membershipPeriods: MembershipPeriod[];
+};
+
+export type MembershipService = "Nintendo Switch Online" | "PlayStation Plus";
+
+export type MembershipPeriod = {
+  id: string;
+  service: MembershipService;
+  startDate: string;
+  endDate: string;
+  price: number;
+  currency: Currency;
 };
 
 export async function readAppSettings(): Promise<AppSettings> {
@@ -282,8 +301,16 @@ function ensureCacheTable(db: DatabaseSync) {
   ).run();
 }
 
-function normalizeAppSettings(value: unknown): AppSettings {
+export function normalizeAppSettings(value: unknown): AppSettings {
   const source = value && typeof value === "object" ? (value as Partial<AppSettings>) : {};
+  const membershipPeriods = normalizeMembershipPeriods(source.membershipPeriods, source);
+  const today = new Date().toISOString().slice(0, 10);
+  const activePsPlus = activeMembershipPeriods(membershipPeriods, "PlayStation Plus", today);
+  const activeNsOnline = activeMembershipPeriods(
+    membershipPeriods,
+    "Nintendo Switch Online",
+    today,
+  );
   return {
     siteTitle:
       typeof source.siteTitle === "string" && source.siteTitle.trim()
@@ -304,12 +331,109 @@ function normalizeAppSettings(value: unknown): AppSettings {
         : "https://api.openai.com/v1",
     aiModel: typeof source.aiModel === "string" && source.aiModel ? source.aiModel : "gpt-4.1-mini",
     aiApiKey: typeof source.aiApiKey === "string" ? source.aiApiKey : "",
-    psPlusEnabled: source.psPlusEnabled === true,
-    psPlusExpiresAt: typeof source.psPlusExpiresAt === "string" ? source.psPlusExpiresAt : "",
+    psPlusEnabled: activePsPlus.length > 0,
+    psPlusExpiresAt: latestMembershipEndDate(activePsPlus),
     psPlusAutoAddMonthly: source.psPlusAutoAddMonthly !== false,
-    nsOnlineEnabled: source.nsOnlineEnabled === true,
-    nsOnlineExpiresAt: typeof source.nsOnlineExpiresAt === "string" ? source.nsOnlineExpiresAt : "",
+    nsOnlineEnabled: activeNsOnline.length > 0,
+    nsOnlineExpiresAt: latestMembershipEndDate(activeNsOnline),
+    membershipPeriods,
   };
+}
+
+export function normalizeMembershipPeriods(
+  value: unknown,
+  legacy?: Partial<AppSettings>,
+): MembershipPeriod[] {
+  if (Array.isArray(value)) {
+    const periods = value
+      .slice(0, 200)
+      .flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const source = item as Partial<MembershipPeriod>;
+        if (source.service !== "Nintendo Switch Online" && source.service !== "PlayStation Plus")
+          return [];
+        const startDate = normalizeMembershipDate(source.startDate);
+        const endDate = normalizeMembershipDate(source.endDate);
+        if (
+          (typeof source.startDate === "string" && source.startDate && !startDate) ||
+          !endDate ||
+          (startDate && startDate > endDate)
+        )
+          return [];
+        const currency = currencies.includes(source.currency as Currency)
+          ? (source.currency as Currency)
+          : "CNY";
+        return [
+          {
+            id:
+              typeof source.id === "string" && source.id.trim()
+                ? source.id.trim().slice(0, 100)
+                : crypto.randomUUID(),
+            service: source.service,
+            startDate,
+            endDate,
+            price: validLedgerNumber(source.price),
+            currency,
+          },
+        ];
+      })
+      .sort((left, right) => right.endDate.localeCompare(left.endDate));
+    return periods.filter(
+      (period, index) => periods.findIndex((candidate) => candidate.id === period.id) === index,
+    );
+  }
+
+  const migrated: MembershipPeriod[] = [];
+  if (legacy?.nsOnlineEnabled && normalizeMembershipDate(legacy.nsOnlineExpiresAt)) {
+    migrated.push({
+      id: "legacy-ns-online",
+      service: "Nintendo Switch Online",
+      startDate: "",
+      endDate: normalizeMembershipDate(legacy.nsOnlineExpiresAt),
+      price: 0,
+      currency: "CNY",
+    });
+  }
+  if (legacy?.psPlusEnabled && normalizeMembershipDate(legacy.psPlusExpiresAt)) {
+    migrated.push({
+      id: "legacy-ps-plus",
+      service: "PlayStation Plus",
+      startDate: "",
+      endDate: normalizeMembershipDate(legacy.psPlusExpiresAt),
+      price: 0,
+      currency: "CNY",
+    });
+  }
+  return migrated;
+}
+
+export function activeMembershipPeriods(
+  periods: MembershipPeriod[],
+  service: MembershipService,
+  today = new Date().toISOString().slice(0, 10),
+) {
+  return periods.filter(
+    (period) =>
+      period.service === service &&
+      (!period.startDate || period.startDate <= today) &&
+      period.endDate >= today,
+  );
+}
+
+function normalizeMembershipDate(value: unknown) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+  try {
+    return new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value ? value : "";
+  } catch {
+    return "";
+  }
+}
+
+function latestMembershipEndDate(periods: MembershipPeriod[]) {
+  return periods.reduce(
+    (latest, period) => (period.endDate > latest ? period.endDate : latest),
+    "",
+  );
 }
 
 function writeLedgerToOpenSqlite(

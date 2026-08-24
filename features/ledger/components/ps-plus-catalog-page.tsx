@@ -84,9 +84,7 @@ export function PsPlusCatalogPage({
           <strong>{filteredGames.length}</strong>
           <span>当前结果</span>
         </div>
-        <p>
-          这里展示港区 PlayStation Plus 完整游戏目录，不会自动加入购买记录。目录会随会员服务调整。
-        </p>
+        <p>港区 PlayStation Plus 升级与高级会员游戏目录</p>
       </div>
       {catalog ? (
         <p className="catalog-updated">

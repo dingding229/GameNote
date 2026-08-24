@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasValidAccessCookie } from "@/lib/auth/access";
 import { createLedgerDocument, type GameRecord } from "@/lib/ledger/schema";
+import { enrichMonthlyGames, parsePsPlusMonthlyFeed } from "@/lib/game/ps-plus-monthly";
 import {
   LedgerConflictError,
   readAppSettings,
@@ -32,44 +33,68 @@ export async function POST(request: NextRequest) {
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const monthly = parseMonthlyGames(await response.text());
+    const monthly = parsePsPlusMonthlyFeed(await response.text());
     if (!monthly)
       return NextResponse.json({ added: 0, games: [], message: "暂未找到当月 PS Plus 会免阵容" });
+    const enrichedGames = await enrichMonthlyGames(monthly.games);
     let additions: GameRecord[] = [];
+    let updated = 0;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const ledger = await readLedgerFromSqlite();
-      additions = monthly.games
+      updated = 0;
+      const refreshedRecords = ledger.records.map((record) => {
+        if (!record.notes.includes(`PS Plus 会免 ${monthly.month}`)) return record;
+        const gameIndex = enrichedGames.findIndex((game, index) =>
+          [game.title, monthly.games[index]?.title].some(
+            (title) => normalizeTitle(record.title) === normalizeTitle(title || ""),
+          ),
+        );
+        const game = enrichedGames[gameIndex];
+        if (!game) return record;
+        const refreshed = {
+          ...record,
+          title: game.title,
+          region: "港版" as const,
+          coverUrl: game.coverUrl || record.coverUrl,
+          officialUrl: game.officialUrl || record.officialUrl,
+        };
+        if (JSON.stringify(refreshed) !== JSON.stringify(record)) updated += 1;
+        return refreshed;
+      });
+      additions = enrichedGames
         .filter(
-          (title) =>
+          (game, gameIndex) =>
             !ledger.records.some(
               (record) =>
                 record.notes.includes(`PS Plus 会免 ${monthly.month}`) &&
-                normalizeTitle(record.title) === normalizeTitle(title),
+                [game.title, monthly.games[gameIndex]?.title].some(
+                  (title) => normalizeTitle(record.title) === normalizeTitle(title || ""),
+                ),
             ),
         )
         .map(
-          (title): GameRecord => ({
+          (game): GameRecord => ({
             id: crypto.randomUUID(),
             platform: "PlayStation",
-            title,
+            title: game.title,
             price: 0,
             currency: "CNY",
             purchaseDate: new Date().toISOString().slice(0, 10),
-            region: "其他",
+            region: "港版",
             format: "数字版",
             seller: "PlayStation Plus",
-            coverUrl: "",
-            officialUrl: monthly.url,
+            coverUrl: game.coverUrl,
+            officialUrl: game.officialUrl,
             notes: `PS Plus 会免 ${monthly.month}`,
             soldDate: "",
             soldPrice: 0,
             soldCurrency: "CNY",
           }),
         );
-      if (!additions.length) break;
+      if (!additions.length && !updated) break;
       try {
         await writeLedgerToSqlite(
-          createLedgerDocument([...additions, ...ledger.records]),
+          createLedgerDocument([...additions, ...refreshedRecords]),
           ledger.updatedAt,
         );
         break;
@@ -79,9 +104,11 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({
       added: additions.length,
-      games: monthly.games,
+      updated,
+      games: additions.map((game) => game.title),
       month: monthly.month,
       records: additions,
+      message: updated ? `已补全 ${updated} 款会免游戏的中文名、封面和官方链接` : "当月会免已同步",
     });
   } catch (error) {
     return NextResponse.json(
@@ -91,46 +118,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function parseMonthlyGames(xml: string) {
-  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
-  for (const match of items) {
-    const item = match[1];
-    const rawTitle = decodeEntities(textBetween(item, "title"));
-    if (!/PlayStation Plus Monthly Games for/i.test(rawTitle) || /Game Catalog/i.test(rawTitle))
-      continue;
-    const monthName = rawTitle.match(/Monthly Games for ([A-Za-z]+)/i)?.[1];
-    const currentMonth = new Date().toLocaleString("en-US", { month: "long" });
-    if (!monthName || monthName.toLowerCase() !== currentMonth.toLowerCase()) continue;
-    const separator = rawTitle.match(/(?:–|—|:| - )/);
-    if (!separator || separator.index === undefined) continue;
-    const games = rawTitle
-      .slice(separator.index + separator[0].length)
-      .split(/,| and /i)
-      .map((title) => title.trim())
-      .filter(Boolean);
-    if (!games.length) continue;
-    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-    return { games, month, url: decodeEntities(textBetween(item, "link")) };
-  }
-  return null;
-}
-
-function textBetween(value: string, tag: string) {
-  return (
-    value
-      .match(
-        new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`, "i"),
-      )?.[1]
-      ?.trim() || ""
-  );
-}
-function decodeEntities(value: string) {
-  return value
-    .replace(/&#8211;|&#8212;|&ndash;|&mdash;/g, "–")
-    .replace(/&#8217;|&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/<[^>]+>/g, "");
-}
 function normalizeTitle(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, "");
 }

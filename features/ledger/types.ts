@@ -2,6 +2,16 @@ export type Region = "日版" | "港版" | "台版" | "美版" | "欧版" | "其
 export type GamePlatform = "Nintendo Switch" | "PlayStation";
 export type GameFormat = "实体卡带" | "实体光盘" | "数字版";
 export type Currency = "CNY" | "JPY" | "HKD" | "USD" | "EUR" | "BRL";
+export type MembershipService = "Nintendo Switch Online" | "PlayStation Plus";
+
+export type MembershipPeriod = {
+  id: string;
+  service: MembershipService;
+  startDate: string;
+  endDate: string;
+  price: number;
+  currency: Currency;
+};
 
 export type GameRecord = {
   id: string;
@@ -67,6 +77,7 @@ export type SettingsState = {
   psPlusAutoAddMonthly: boolean;
   nsOnlineEnabled: boolean;
   nsOnlineExpiresAt: string;
+  membershipPeriods: MembershipPeriod[];
 };
 
 export type PsPlusCatalogGame = {

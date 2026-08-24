@@ -1,5 +1,6 @@
-import type { ChangeEvent, Dispatch, FormEvent, RefObject, SetStateAction } from "react";
-import type { SettingsState } from "../types";
+import type { ChangeEvent, Dispatch, FormEvent, ReactNode, RefObject, SetStateAction } from "react";
+import { currencies } from "../constants";
+import type { Currency, MembershipPeriod, MembershipService, SettingsState } from "../types";
 import { ModelCombobox } from "./model-combobox";
 
 type SettingsUpdater = Dispatch<SetStateAction<SettingsState>>;
@@ -205,7 +206,7 @@ export function SettingsPage({
       <section className="settings-section">
         <div>
           <h3>数据备份</h3>
-          <p>导出全部购买记录，或从 JSON 备份恢复记录。</p>
+          <p>备份购买记录与应用设置；AI API Key 和账户密码不会导出。</p>
         </div>
         <div className="settings-fields">
           <div className="settings-actions settings-wide">
@@ -290,98 +291,102 @@ export function MembershipPage({
   onSubmit,
   onSyncPsPlus,
 }: MembershipPageProps) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  function addPeriod(service: MembershipService) {
+    setSettings((current) => ({
+      ...current,
+      membershipPeriods: [
+        {
+          id: crypto.randomUUID(),
+          service,
+          startDate: today,
+          endDate: today,
+          price: 0,
+          currency: "CNY",
+        },
+        ...current.membershipPeriods,
+      ],
+    }));
+  }
+
+  function updatePeriod<Key extends keyof MembershipPeriod>(
+    id: string,
+    key: Key,
+    value: MembershipPeriod[Key],
+  ) {
+    setSettings((current) => ({
+      ...current,
+      membershipPeriods: current.membershipPeriods.map((period) =>
+        period.id === id ? { ...period, [key]: value } : period,
+      ),
+    }));
+  }
+
+  function removePeriod(id: string) {
+    setSettings((current) => ({
+      ...current,
+      membershipPeriods: current.membershipPeriods.filter((period) => period.id !== id),
+    }));
+  }
+
+  const hasActivePsPlus = settings.membershipPeriods.some(
+    (period) =>
+      period.service === "PlayStation Plus" &&
+      (!period.startDate || period.startDate <= today) &&
+      period.endDate >= today,
+  );
+
   return (
     <form className="settings-page membership-page" onSubmit={onSubmit}>
       <header>
         <p className="ledger-kicker">Memberships</p>
         <h2>会员记录</h2>
-        <span>统一记录 Nintendo Switch Online 与 PlayStation Plus 会员状态</span>
+        <span>按时间段保存会员历史、有效期和购买价格</span>
       </header>
-      <section className="settings-section membership-section">
-        <div>
-          <h3>Nintendo Switch Online</h3>
-          <p>仅记录会员状态和到期时间，不触发任何自动功能。</p>
-        </div>
-        <div className="settings-fields">
-          <label className="checkbox-field settings-wide">
-            <input
-              type="checkbox"
-              checked={settings.nsOnlineEnabled}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, nsOnlineEnabled: event.target.checked }))
-              }
-            />
-            <span>已开通 Nintendo Switch Online</span>
-          </label>
-          <label className="field">
-            <span>会员到期时间</span>
-            <input
-              type="date"
-              disabled={!settings.nsOnlineEnabled}
-              value={settings.nsOnlineExpiresAt}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, nsOnlineExpiresAt: event.target.value }))
-              }
-            />
-          </label>
-        </div>
-      </section>
-      <section className="settings-section membership-section">
-        <div>
-          <h3>PlayStation Plus</h3>
-          <p>记录会员有效期，并控制每月会免是否自动加入游戏记录。</p>
-        </div>
-        <div className="settings-fields">
-          <label className="checkbox-field settings-wide">
-            <input
-              type="checkbox"
-              checked={settings.psPlusEnabled}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, psPlusEnabled: event.target.checked }))
-              }
-            />
-            <span>已开通 PlayStation Plus</span>
-          </label>
-          <label className="field">
-            <span>会员到期时间</span>
-            <input
-              type="date"
-              disabled={!settings.psPlusEnabled}
-              value={settings.psPlusExpiresAt}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, psPlusExpiresAt: event.target.value }))
-              }
-            />
-          </label>
-          <label className="checkbox-field settings-wide">
-            <input
-              type="checkbox"
-              disabled={!settings.psPlusEnabled}
-              checked={settings.psPlusAutoAddMonthly}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  psPlusAutoAddMonthly: event.target.checked,
-                }))
-              }
-            />
-            <span>自动识别并加入每月会免游戏</span>
-          </label>
-          <button
-            className="ghost-button"
-            type="button"
-            disabled={!settings.psPlusEnabled || !settings.psPlusAutoAddMonthly}
-            onClick={onSyncPsPlus}
-          >
-            立即检查本月会免
-          </button>
-          {psPlusStatus ? (
-            <p className="settings-wide settings-message" role="status" aria-live="polite">
-              {psPlusStatus}
-            </p>
+      {(["Nintendo Switch Online", "PlayStation Plus"] as const).map((service) => (
+        <MembershipPeriodSection
+          key={service}
+          service={service}
+          periods={settings.membershipPeriods.filter((period) => period.service === service)}
+          today={today}
+          onAdd={() => addPeriod(service)}
+          onChange={updatePeriod}
+          onRemove={removePeriod}
+        >
+          {service === "PlayStation Plus" ? (
+            <>
+              <label className="checkbox-field settings-wide">
+                <input
+                  type="checkbox"
+                  disabled={!hasActivePsPlus}
+                  checked={settings.psPlusAutoAddMonthly}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      psPlusAutoAddMonthly: event.target.checked,
+                    }))
+                  }
+                />
+                <span>会员有效期间自动识别并加入每月会免游戏</span>
+              </label>
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={!hasActivePsPlus || !settings.psPlusAutoAddMonthly}
+                onClick={onSyncPsPlus}
+              >
+                立即检查本月会免
+              </button>
+              {psPlusStatus ? (
+                <p className="settings-wide settings-message" role="status" aria-live="polite">
+                  {psPlusStatus}
+                </p>
+              ) : null}
+            </>
           ) : null}
-        </div>
-      </section>
+        </MembershipPeriodSection>
+      ))}
       <footer>
         <span role="status" aria-live="polite">
           {settingsStatus}
@@ -391,5 +396,112 @@ export function MembershipPage({
         </button>
       </footer>
     </form>
+  );
+}
+
+function MembershipPeriodSection({
+  service,
+  periods,
+  today,
+  onAdd,
+  onChange,
+  onRemove,
+  children,
+}: {
+  service: MembershipService;
+  periods: MembershipPeriod[];
+  today: string;
+  onAdd: () => void;
+  onChange: <Key extends keyof MembershipPeriod>(
+    id: string,
+    key: Key,
+    value: MembershipPeriod[Key],
+  ) => void;
+  onRemove: (id: string) => void;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="settings-section membership-section">
+      <div className="membership-section-heading">
+        <div>
+          <h3>{service}</h3>
+          <p>新增续费记录不会覆盖已过期的历史时间段。</p>
+        </div>
+        <button className="secondary-button" type="button" onClick={onAdd}>
+          新增会员记录
+        </button>
+      </div>
+      <div className="membership-periods">
+        {periods.length ? (
+          periods.map((period) => {
+            const status =
+              period.endDate < today ? "已过期" : period.startDate > today ? "未开始" : "生效中";
+            return (
+              <article className="membership-period" key={period.id}>
+                <div className="membership-period-title">
+                  <strong>
+                    {period.startDate || "开始时间未知"} — {period.endDate}
+                  </strong>
+                  <span data-status={status}>{status}</span>
+                </div>
+                <div className="membership-period-fields">
+                  <label className="field">
+                    <span>开始日期</span>
+                    <input
+                      type="date"
+                      value={period.startDate}
+                      max={period.endDate || undefined}
+                      onChange={(event) => onChange(period.id, "startDate", event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>结束日期</span>
+                    <input
+                      type="date"
+                      required
+                      min={period.startDate || undefined}
+                      value={period.endDate}
+                      onChange={(event) => onChange(period.id, "endDate", event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>购买价格</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100000000"
+                      step="0.01"
+                      value={period.price}
+                      onChange={(event) =>
+                        onChange(period.id, "price", Number(event.target.value) || 0)
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>币种</span>
+                    <select
+                      value={period.currency}
+                      onChange={(event) =>
+                        onChange(period.id, "currency", event.target.value as Currency)
+                      }
+                    >
+                      {currencies.map((currency) => (
+                        <option key={currency}>{currency}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <button className="danger-button" type="button" onClick={() => onRemove(period.id)}>
+                  删除这条记录
+                </button>
+              </article>
+            );
+          })
+        ) : (
+          <p className="membership-empty">暂无会员记录</p>
+        )}
+        {children ? <div className="membership-period-actions">{children}</div> : null}
+      </div>
+    </section>
   );
 }
