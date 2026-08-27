@@ -1104,6 +1104,63 @@ a:focus-visible,
   padding: 0.85rem 1rem;
 }
 
+.share-record-picker {
+  background: var(--color-base-200);
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-field);
+  padding: 0.85rem 1rem;
+}
+
+.share-record-picker-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+
+.share-record-picker-header > div {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.share-record-picker-header .ghost-button {
+  font-size: 0.78rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.share-record-list {
+  display: grid;
+  gap: 0.35rem;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  max-height: 13rem;
+  overflow-y: auto;
+}
+
+.share-record-item {
+  align-items: center;
+  border-radius: 0.4rem;
+  display: flex;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.35rem 0.45rem;
+}
+
+.share-record-item:hover {
+  background: var(--color-base-300);
+}
+
+.share-record-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-record-item small {
+  color: color-mix(in srgb, var(--color-base-content) 55%, transparent);
+  margin-left: auto;
+}
+
 .share-preview {
   align-items: center;
   background: var(--color-base-200);

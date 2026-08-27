@@ -105,6 +105,7 @@ export default function LedgerClient({
     showDate: false,
     showNotes: false,
   });
+  const [shareRecordIds, setShareRecordIds] = useState<string[]>([]);
   const [shareImageUrl, setShareImageUrl] = useState("");
   const [shareStatus, setShareStatus] = useState<"idle" | "generating" | "error">("idle");
   const purchaseImageInputRef = useRef<HTMLInputElement>(null);
@@ -1126,7 +1127,8 @@ export default function LedgerClient({
   async function generateShareImage() {
     setShareStatus("generating");
     try {
-      const blob = await createLibraryShareImage(records, shareOptions);
+      const selectedRecords = records.filter((record) => shareRecordIds.includes(record.id));
+      const blob = await createLibraryShareImage(selectedRecords, shareOptions);
       if (shareImageUrl) URL.revokeObjectURL(shareImageUrl);
       setShareImageUrl(URL.createObjectURL(blob));
       setShareStatus("idle");
@@ -1137,7 +1139,8 @@ export default function LedgerClient({
 
   async function shareLibraryImage() {
     try {
-      const blob = await createLibraryShareImage(records, shareOptions);
+      const selectedRecords = records.filter((record) => shareRecordIds.includes(record.id));
+      const blob = await createLibraryShareImage(selectedRecords, shareOptions);
       const file = new File([blob], `game-library-${todayString()}.png`, { type: "image/png" });
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
         await navigator.share({ title: "我的游戏收藏", files: [file] });
@@ -2280,9 +2283,9 @@ export default function LedgerClient({
                           <div>
                             <h2 id="share-dialog-title">分享我的游戏收藏</h2>
                             <p>
-                              {records.length > maxShareImageRecords
-                                ? `共 ${records.length} 款，本图展示前 ${maxShareImageRecords} 款`
-                                : `将全部 ${records.length} 款游戏生成一张图片`}
+                              {shareRecordIds.length > maxShareImageRecords
+                                ? `已选择 ${shareRecordIds.length} 款，本图展示前 ${maxShareImageRecords} 款`
+                                : `已选择 ${shareRecordIds.length} / ${records.length} 款游戏`}
                             </p>
                           </div>
                           <button className="ghost-button" type="button" onClick={closeSharePanel}>
@@ -2313,6 +2316,52 @@ export default function LedgerClient({
                             </label>
                           ))}
                         </div>
+                        <div className="share-record-picker">
+                          <div className="share-record-picker-header">
+                            <strong>选择要分享的游戏</strong>
+                            <div>
+                              <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() =>
+                                  setShareRecordIds(records.map((record) => record.id))
+                                }
+                              >
+                                全选
+                              </button>
+                              <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setShareRecordIds([])}
+                              >
+                                清空
+                              </button>
+                            </div>
+                          </div>
+                          <div className="share-record-list">
+                            {records.map((record) => (
+                              <label key={record.id} className="share-record-item">
+                                <input
+                                  type="checkbox"
+                                  checked={shareRecordIds.includes(record.id)}
+                                  onChange={(event) =>
+                                    (() => {
+                                      setShareRecordIds((current) =>
+                                        event.target.checked
+                                          ? [...current, record.id]
+                                          : current.filter((id) => id !== record.id),
+                                      );
+                                      if (shareImageUrl) URL.revokeObjectURL(shareImageUrl);
+                                      setShareImageUrl("");
+                                    })()
+                                  }
+                                />
+                                <span>{record.title}</span>
+                                <small>{record.platform === "PlayStation" ? "PS" : "NS"}</small>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
                         <div className="share-preview">
                           {shareImageUrl ? (
                             <img src={shareImageUrl} alt="游戏收藏分享图预览" />
@@ -2331,7 +2380,7 @@ export default function LedgerClient({
                           <button
                             className="ghost-button"
                             type="button"
-                            disabled={shareStatus === "generating"}
+                            disabled={shareStatus === "generating" || !shareRecordIds.length}
                             onClick={generateShareImage}
                           >
                             {shareStatus === "generating" ? "生成中" : "生成预览"}
@@ -2339,7 +2388,7 @@ export default function LedgerClient({
                           <button
                             className="primary-button"
                             type="button"
-                            disabled={shareStatus === "generating"}
+                            disabled={shareStatus === "generating" || !shareRecordIds.length}
                             onClick={shareLibraryImage}
                           >
                             分享或下载图片
@@ -2668,7 +2717,10 @@ export default function LedgerClient({
                   className="ghost-button"
                   type="button"
                   disabled={!records.length}
-                  onClick={() => setShareOpen(true)}
+                  onClick={() => {
+                    setShareRecordIds(records.map((record) => record.id));
+                    setShareOpen(true);
+                  }}
                 >
                   分享游戏库
                 </button>
