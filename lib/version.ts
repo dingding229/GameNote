@@ -1,4 +1,4 @@
-export const appVersion = "1.0.10";
+export const appVersion = "1.0.11";
 
 export function normalizeVersion(value: string) {
   const match = value.trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/i);
