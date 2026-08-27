@@ -106,6 +106,7 @@ export default function LedgerClient({
     showNotes: false,
   });
   const [shareRecordIds, setShareRecordIds] = useState<string[]>([]);
+  const [sharePlatformFilter, setSharePlatformFilter] = useState<"all" | GamePlatform>("all");
   const [shareImageUrl, setShareImageUrl] = useState("");
   const [shareStatus, setShareStatus] = useState<"idle" | "generating" | "error">("idle");
   const purchaseImageInputRef = useRef<HTMLInputElement>(null);
@@ -850,6 +851,14 @@ export default function LedgerClient({
       ? "NS + PS"
       : "仅 NS"
     : "仅 PS";
+
+  const shareVisibleRecords = useMemo(
+    () =>
+      sharePlatformFilter === "all"
+        ? records
+        : records.filter((record) => record.platform === sharePlatformFilter),
+    [records, sharePlatformFilter],
+  );
 
   const filteredRecords = useMemo(() => {
     const normalizedQuery = normalizeChineseSearchText(query);
@@ -2320,14 +2329,31 @@ export default function LedgerClient({
                           <div className="share-record-picker-header">
                             <strong>选择要分享的游戏</strong>
                             <div>
+                              <select
+                                className="share-platform-filter"
+                                value={sharePlatformFilter}
+                                aria-label="按平台筛选游戏"
+                                onChange={(event) =>
+                                  setSharePlatformFilter(event.target.value as "all" | GamePlatform)
+                                }
+                              >
+                                <option value="all">全部平台</option>
+                                <option value="Nintendo Switch">NS</option>
+                                <option value="PlayStation">PS</option>
+                              </select>
                               <button
                                 className="ghost-button"
                                 type="button"
                                 onClick={() =>
-                                  setShareRecordIds(records.map((record) => record.id))
+                                  setShareRecordIds((current) => [
+                                    ...new Set([
+                                      ...current,
+                                      ...shareVisibleRecords.map((record) => record.id),
+                                    ]),
+                                  ])
                                 }
                               >
-                                全选
+                                全选当前
                               </button>
                               <button
                                 className="ghost-button"
@@ -2339,7 +2365,7 @@ export default function LedgerClient({
                             </div>
                           </div>
                           <div className="share-record-list">
-                            {records.map((record) => (
+                            {shareVisibleRecords.map((record) => (
                               <label key={record.id} className="share-record-item">
                                 <input
                                   type="checkbox"
@@ -2719,6 +2745,7 @@ export default function LedgerClient({
                   disabled={!records.length}
                   onClick={() => {
                     setShareRecordIds(records.map((record) => record.id));
+                    setSharePlatformFilter("all");
                     setShareOpen(true);
                   }}
                 >

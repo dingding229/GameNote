@@ -1121,6 +1121,17 @@ a:focus-visible,
 .share-record-picker-header > div {
   display: flex;
   gap: 0.4rem;
+  align-items: center;
+}
+
+.share-platform-filter {
+  background: var(--color-base-100);
+  border: 1px solid var(--color-base-300);
+  border-radius: 0.4rem;
+  color: inherit;
+  font-size: 0.8rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
 }
 
 .share-record-picker-header .ghost-button {
