@@ -10,11 +10,13 @@ import { AppToolbar, Stat } from "./components/app-toolbar";
 import { ConfirmationDialog } from "./components/confirmation-dialog";
 import {
   catalogPageSize,
+  catalogDisplayModeStorageKey,
   currencies,
   emptyForm,
   exchangeCacheKey,
   gamePlatforms,
   regions,
+  recordDisplayModeStorageKey,
 } from "./constants";
 import { MembershipPage, SettingsPage } from "./components/settings-pages";
 import { MobileAccountMenu } from "./components/mobile-account-menu";
@@ -309,6 +311,27 @@ export default function LedgerClient({
   useEffect(() => {
     void checkVersion();
   }, [checkVersion]);
+
+  useEffect(() => {
+    const storedRecordMode = window.localStorage.getItem(recordDisplayModeStorageKey);
+    if (storedRecordMode === "grid" || storedRecordMode === "list") {
+      setRecordDisplayMode(storedRecordMode);
+    }
+    const storedCatalogMode = window.localStorage.getItem(catalogDisplayModeStorageKey);
+    if (storedCatalogMode === "grid" || storedCatalogMode === "list") {
+      setCatalogDisplayMode(storedCatalogMode);
+    }
+  }, []);
+
+  function changeRecordDisplayMode(mode: RecordDisplayMode) {
+    setRecordDisplayMode(mode);
+    window.localStorage.setItem(recordDisplayModeStorageKey, mode);
+  }
+
+  function changeCatalogDisplayMode(mode: RecordDisplayMode) {
+    setCatalogDisplayMode(mode);
+    window.localStorage.setItem(catalogDisplayModeStorageKey, mode);
+  }
 
   useEffect(() => {
     if (accessStatus === "checking") return;
@@ -1927,7 +1950,7 @@ export default function LedgerClient({
                   filteredGames={filteredCatalogGames}
                   visibleGames={visibleCatalogGames}
                   onQueryChange={setCatalogQuery}
-                  onDisplayModeChange={setCatalogDisplayMode}
+                  onDisplayModeChange={changeCatalogDisplayMode}
                   onLoad={loadPsPlusCatalog}
                   onLoadMore={(increment) => setCatalogVisibleCount((count) => count + increment)}
                 />
@@ -1981,7 +2004,7 @@ export default function LedgerClient({
                           className={recordDisplayMode === "grid" ? "active" : ""}
                           type="button"
                           aria-pressed={recordDisplayMode === "grid"}
-                          onClick={() => setRecordDisplayMode("grid")}
+                          onClick={() => changeRecordDisplayMode("grid")}
                         >
                           网格
                         </button>
@@ -1989,7 +2012,7 @@ export default function LedgerClient({
                           className={recordDisplayMode === "list" ? "active" : ""}
                           type="button"
                           aria-pressed={recordDisplayMode === "list"}
-                          onClick={() => setRecordDisplayMode("list")}
+                          onClick={() => changeRecordDisplayMode("list")}
                         >
                           列表
                         </button>
