@@ -525,6 +525,17 @@ a:focus-visible,
   object-fit: cover;
   width: 100%;
 }
+.record-card h3 a,
+.record-list-main h3 a {
+  color: inherit;
+  text-decoration: none;
+}
+.record-card h3 a:hover,
+.record-list-main h3 a:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.18rem;
+}
 
 .stat-card {
   background: var(--color-base-200);

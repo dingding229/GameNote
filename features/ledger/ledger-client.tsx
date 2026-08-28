@@ -64,6 +64,7 @@ import {
   formatMoney,
   formatOptionsForPlatform,
   isPhysicalFormat,
+  isSafeOfficialUrl,
   lookupPriceLabel,
   maxShareImageRecords,
   normalizeFormatForPlatform,
@@ -2085,7 +2086,13 @@ export default function LedgerClient({
                           <div className="flex flex-1 flex-col gap-3 p-3 sm:p-4">
                             <div>
                               <h3 className="line-clamp-2 min-h-12 text-lg font-semibold leading-6">
-                                {record.title}
+                                {isSafeOfficialUrl(record.officialUrl) ? (
+                                  <a href={record.officialUrl} target="_blank" rel="noreferrer">
+                                    {record.title}
+                                  </a>
+                                ) : (
+                                  record.title
+                                )}
                               </h3>
                               <p className="mt-1 text-sm text-base-content/60">
                                 {record.purchaseDate} · {record.format}
@@ -2192,7 +2199,15 @@ export default function LedgerClient({
                           </div>
                           <div className="record-list-main">
                             <div className="min-w-0">
-                              <h3 title={record.title}>{record.title}</h3>
+                              <h3 title={record.title}>
+                                {isSafeOfficialUrl(record.officialUrl) ? (
+                                  <a href={record.officialUrl} target="_blank" rel="noreferrer">
+                                    {record.title}
+                                  </a>
+                                ) : (
+                                  record.title
+                                )}
+                              </h3>
                               <p>
                                 {record.purchaseDate} · {record.region} · {record.format}
                                 {record.seller ? ` · ${record.seller}` : ""}

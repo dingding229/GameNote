@@ -65,6 +65,15 @@ export function officialUrlPlaceholder(platform: GamePlatform) {
     : "https://www.nintendo.com/...";
 }
 
+export function isSafeOfficialUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export function convertToCny(
   amount: number,
   currency: Currency,
